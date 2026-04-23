@@ -1,0 +1,111 @@
+# ForgeAI — .gitignore
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-wheel-metadata/
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# ── Environment & Secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+# Keep .env.example tracked
+!.env.example
+!apps/**/.env.example
+
+# ── Model Weights & Checkpoints ───────────────────────────────────────────────
+# These can be hundreds of GB — never commit them
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+*.ggml
+*.q4_0
+*.q4_1
+*.q8_0
+checkpoints/
+models/weights/
+models/checkpoints/
+
+# ── Datasets ──────────────────────────────────────────────────────────────────
+# Raw data files — use MinIO/S3 for storage
+*.csv
+*.parquet
+*.arrow
+*.jsonl
+*.txt.gz
+*.tar.gz
+*.zip
+data/raw/
+data/processed/
+datasets/
+
+# ── Research Papers ──────────────────────────────────────────────────────────
+# PDFs are gitignored — download from arXiv links in papers/README.md
+# Use git-lfs if you want to track PDFs: git lfs track '*.pdf'
+papers/**/*.pdf
+papers/**/*.PDF
+# Keep folder structure and reading list
+!papers/**/.gitkeep
+!papers/**/README.md
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+docker-volumes/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+*.log.*
+
+# ── Coverage & Testing ───────────────────────────────────────────────────────
+.coverage
+coverage/
+htmlcov/
+.pytest_cache/
+test-results/
+playwright-report/
+.nyc_output/
+
+# ── Editors & OS ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Alembic ───────────────────────────────────────────────────────────────────
+# Keep migrations tracked, ignore pycache inside
+apps/*/migrations/__pycache__/
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.bak
+*.tmp
+.cache/
+tmp/
+scratch/

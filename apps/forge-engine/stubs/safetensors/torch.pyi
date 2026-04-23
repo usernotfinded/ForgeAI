@@ -1,0 +1,3 @@
+from typing import Any
+
+def load_file(filename: str, device: str = ...) -> dict[str, Any]: ...

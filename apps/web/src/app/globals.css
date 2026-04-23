@@ -1,0 +1,99 @@
+/* ── Google Fonts — must come before @tailwind ──────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base Layer ────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --border: 214.3 31.8% 91.4%;
+    --ring: 238.7 83.5% 66.7%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --border: 217.2 32.6% 17.5%;
+    --ring: 238.7 83.5% 66.7%;
+  }
+
+  * {
+    @apply border-surface-200 dark:border-surface-700;
+  }
+
+  body {
+    @apply bg-surface-0 text-surface-900 dark:bg-surface-950 dark:text-surface-50;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ── Utility Classes ───────────────────────────────────────────────────── */
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-400 via-brand-500 to-brand-600;
+  }
+
+  .glass {
+    @apply bg-white/70 dark:bg-surface-900/70 backdrop-blur-xl border border-white/20 dark:border-surface-700/50;
+  }
+
+  .glass-card {
+    @apply glass rounded-2xl shadow-lg;
+  }
+
+  .glow {
+    @apply shadow-glow;
+  }
+
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0 dark:focus-visible:ring-offset-surface-950;
+  }
+
+  .animate-in {
+    @apply animate-fade-in;
+  }
+}
+
+/* ── High Contrast Mode ────────────────────────────────────────────────── */
+.high-contrast {
+  --foreground: 0 0% 0%;
+  --background: 0 0% 100%;
+  --border: 0 0% 0%;
+}
+
+.high-contrast * {
+  border-color: black !important;
+}
+
+.high-contrast body {
+  color: black !important;
+  background: white !important;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-surface-300 dark:bg-surface-600 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-surface-400 dark:bg-surface-500;
+}
