@@ -1,6 +1,9 @@
 # ForgeAI
 
-**Train language models at any scale your hardware supports — from 50M on a laptop to 200B on a cluster. Your data, your hardware, your model.**
+![ForgeAI Banner](./assets/forgeai-banner.png)
+
+**Train language models at any scale your hardware supports — from laptop to cluster.**
+
 
 ForgeAI is an open-source, MLX-first training orchestrator for language models. It adapts to whatever hardware you have — a MacBook Air, a gaming PC with a 4090, a rack of H100s — and configures the training pipeline accordingly. There are no artificial ceilings on model size. If you have the hardware and the patience, you can train it.
 
