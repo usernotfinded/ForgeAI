@@ -5,8 +5,8 @@ Usage:
     forge wizard --data ./corpus/
     forge stretch --model ./models/qwen2.5-0.5b --target-context 131072
     forge plan  --arch transformer --params 400M --data ./corpus/
-    forge train --arch transformer --params 400M --data ./corpus/ --output ./checkpoints/run-1/
-    forge eval  --checkpoint ./checkpoints/run-1/latest --benchmark tinystories hellaswag-mini
+    forge train --arch transformer --params 400M --data ./corpus/ --tokenizer ./tokenizers/tok --output ./checkpoints/run-1/
+    forge eval  ./checkpoints/run-1/latest --benchmark tinystories hellaswag-mini --tokenizer ./tokenizers/tok
     forge chat  ./checkpoints/run-1/latest
     forge model pull smollm-135m
 """
@@ -21,7 +21,7 @@ from rich.console import Console
 
 app = typer.Typer(
     name="forge",
-    help="ForgeAI — train language models at any scale your hardware supports.",
+    help="ForgeAI — local-first CLI workbench for planning, training, and evaluating language models.",
     add_completion=False,
     rich_markup_mode="rich",
 )
@@ -35,12 +35,19 @@ console = Console()
 def plan(
     arch: str = typer.Option("transformer", "--arch", help="Model architecture"),
     params: str = typer.Option(..., "--params", help="Approximate parameter count (e.g. 400M, 7B)"),
-    data: str = typer.Option(..., "--data", help="Path to processed dataset directory"),
+    data: str = typer.Option(
+        ...,
+        "--data",
+        help=(
+            "Path to dataset (raw file/dir or prepared dataset directory). "
+            "If metadata.json exists, planner reports dataset facts."
+        ),
+    ),
     kwh_cost: float = typer.Option(0.30, "--kwh-cost", help="Electricity cost in €/kWh"),
 ):
     """
     Estimate training time, cost, and hardware requirements BEFORE committing to a run.
-    Detects your hardware and configures optimal settings automatically.
+    Detects your runtime backend and proposes conservative defaults.
     """
     from app.core.backend import get_backend
     from app.training.planner import estimate_training
@@ -50,9 +57,19 @@ def plan(
     console.print(str(backend))
     console.print()
 
-    plan_result = estimate_training(
-        arch=arch, params=params, data_path=data, backend=backend, kwh_cost=kwh_cost
+    try:
+        plan_result = estimate_training(
+            arch=arch, params=params, data_path=data, backend=backend, kwh_cost=kwh_cost
+        )
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(
+        "[dim]Planner note: tempo/costo sono stime euristiche. "
+        "I metadati dataset (se presenti) sono usati come contesto informativo.[/dim]"
     )
+    console.print()
     plan_result.print_summary(console)
 
 
@@ -79,6 +96,7 @@ def wizard(
 ):
     """
     Wizard semi-automatico locale con resume affidabile e consenso stratificato.
+    Nota v1 adattamento: supporta solo checkpoint ForgeAI nativi compatibili con preset forge-small.
     """
     from app.wizard import run_wizard
 
@@ -136,7 +154,7 @@ def stretch(
 ):
     """
     Estende in modo persistente un modello compatibile a un contesto più lungo con YaRN (v1).
-    Nota: v1 produce una variante `adapter_plus_manifest` (non `full_checkpoint`).
+    Nota: v1 produce una variante `adapter_plus_manifest` (mapping artifact + manifest, non `full_checkpoint`).
     """
     from app.stretch import run_stretch
 
@@ -153,6 +171,65 @@ def stretch(
 
 
 # ── forge train ───────────────────────────────────────────────────────────────
+
+
+def _compute_train_val_samples(
+    total_samples: int,
+    *,
+    batch_size: int,
+    val_split: float,
+) -> tuple[int, int]:
+    if total_samples <= 0:
+        raise ValueError(
+            "Dataset privo di sequenze utili per il training. "
+            "Riduci --context-length o prepara più dati."
+        )
+    if not 0.0 < val_split < 1.0:
+        raise ValueError("--val-split deve essere strettamente tra 0 e 1.")
+
+    val_samples = max(1, int(total_samples * val_split))
+    train_samples = total_samples - val_samples
+
+    if train_samples <= 0:
+        raise ValueError(
+            "Split non valido: train set vuoto. Riduci --val-split o usa più dati."
+        )
+    if train_samples < batch_size:
+        raise ValueError(
+            "Train loader vuoto con i parametri correnti: "
+            f"{train_samples} sample train < --batch-size {batch_size} (drop_last=True). "
+            "Riduci --batch-size o usa più dati."
+        )
+    if val_samples < batch_size:
+        raise ValueError(
+            "Validation loader vuoto con i parametri correnti: "
+            f"{val_samples} sample val < --batch-size {batch_size} (drop_last=True). "
+            "Riduci --batch-size, riduci --val-split o usa più dati."
+        )
+    return train_samples, val_samples
+
+
+def _validate_training_data_preflight(
+    *,
+    total_tokens: int,
+    total_samples: int,
+    context_length: int,
+    batch_size: int,
+    val_split: float,
+) -> tuple[int, int]:
+    if context_length <= 1:
+        raise ValueError("--context-length deve essere > 1.")
+    if total_tokens <= context_length:
+        raise ValueError(
+            "Dataset troppo piccolo per il context_length scelto: "
+            f"token totali={total_tokens}, context_length={context_length}. "
+            "Riduci --context-length o usa più dati."
+        )
+    return _compute_train_val_samples(
+        total_samples,
+        batch_size=batch_size,
+        val_split=val_split,
+    )
 
 
 @app.command()
@@ -175,10 +252,11 @@ def train(
     gradient_checkpointing: bool = typer.Option(False, "--gradient-checkpointing", help="Enable gradient checkpointing"),
 ):
     """
-    Train a language model from scratch. Auto-configures hardware settings.
+    Train a language model from scratch using the current PyTorch training path (CUDA/MPS/CPU).
+    Native MLX training is planned but not yet implemented.
     """
     import torch
-    from app.core.backend import get_backend
+    from app.core.backend import BackendType, get_backend
     from app.architectures import get_architecture
     from app.tokenizer import load_tokenizer
     from app.data import ShardedTokenDataset
@@ -188,6 +266,16 @@ def train(
     console.print("\n[bold]ForgeAI — Starting training run[/bold]")
     console.print(f"  Backend : {backend.type.value.upper()} — {backend.device_name}")
     console.print(f"  Dtype   : {backend.recommended_dtype}")
+    if backend.type == BackendType.MLX:
+        console.print(
+            "[yellow]MLX rilevato, ma il training nativo MLX non è ancora disponibile.[/yellow]"
+        )
+        console.print("[yellow]Questo run userà il percorso PyTorch su CPU (molto lento).[/yellow]")
+    elif backend.type == BackendType.MPS and backend.mlx_available:
+        console.print(
+            "[dim]Nota: MLX è disponibile per alcuni flussi di inferenza (`forge chat --engine mlx`), "
+            "ma il training usa PyTorch su MPS in questa versione.[/dim]"
+        )
 
     # Load tokenizer
     tokenizer = load_tokenizer(tokenizer_path)
@@ -230,10 +318,24 @@ def train(
     console.print(f"  Context : {ctx_len}")
 
     # Create data loaders
-    dataset = ShardedTokenDataset(data, context_length=ctx_len)
+    try:
+        dataset = ShardedTokenDataset(data, context_length=ctx_len)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    total_tokens = int(getattr(dataset, "total_tokens", 0))
     total_samples = len(dataset)
-    val_samples = max(1, int(total_samples * val_split))
-    train_samples = total_samples - val_samples
+    try:
+        train_samples, val_samples = _validate_training_data_preflight(
+            total_tokens=total_tokens,
+            total_samples=total_samples,
+            context_length=ctx_len,
+            batch_size=batch_size,
+            val_split=val_split,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
     train_dataset, val_dataset = torch.utils.data.random_split(
         dataset, [train_samples, val_samples]
@@ -293,7 +395,11 @@ def evaluate(
     benchmark: list[str] = typer.Option(
         ["perplexity"],
         "--benchmark", "-b",
-        help="Benchmarks: perplexity, tinystories, hellaswag-mini",
+        help=(
+            "Eval helpers: perplexity (real local metric), "
+            "tinystories (proxy qualitative check), "
+            "hellaswag-mini (requires local JSONL file)."
+        ),
     ),
     tokenizer_path: str = typer.Option(None, "--tokenizer", help="Path to tokenizer directory"),
     data: str = typer.Option(None, "--data", help="Path to eval data (for perplexity)"),
@@ -302,7 +408,8 @@ def evaluate(
     max_batches: int = typer.Option(50, "--max-batches", help="Max batches for perplexity eval"),
 ):
     """
-    Evaluate a checkpoint on one or more benchmarks.
+    Evaluate a checkpoint with local metrics/checks.
+    Perplexity is the primary quantitative metric in this workflow.
     """
     import torch
     from app.core.backend import get_backend
@@ -347,25 +454,31 @@ def evaluate(
     results = {}
 
     # Perplexity
-    if "perplexity" in benchmark and data:
-        from app.evaluation import compute_perplexity
-        from app.data import create_dataloader
+    if "perplexity" in benchmark:
+        if not data:
+            console.print(
+                "\n  [yellow]Perplexity requested but --data is missing.[/yellow] "
+                "Pass a prepared dataset directory."
+            )
+        else:
+            from app.evaluation import compute_perplexity
+            from app.data import create_dataloader
 
-        ctx_len = model_config.get("context_length", 2048)
-        eval_loader = create_dataloader(data, context_length=ctx_len, batch_size=batch_size, shuffle=False)
+            ctx_len = model_config.get("context_length", 2048)
+            eval_loader = create_dataloader(data, context_length=ctx_len, batch_size=batch_size, shuffle=False)
 
-        ppl_result = compute_perplexity(model, eval_loader, device=device, max_batches=max_batches, dtype=dtype)
-        results["perplexity"] = ppl_result
+            ppl_result = compute_perplexity(model, eval_loader, device=device, max_batches=max_batches, dtype=dtype)
+            results["perplexity"] = ppl_result
 
-        console.print("\n  [bold]Perplexity[/bold]")
-        console.print(f"    Loss       : {ppl_result['loss']:.4f}")
-        console.print(f"    Perplexity : {ppl_result['perplexity']:.2f}")
-        console.print(f"    Tokens     : {ppl_result['tokens_evaluated']}")
+            console.print("\n  [bold]Perplexity (primary local metric)[/bold]")
+            console.print(f"    Loss       : {ppl_result['loss']:.4f}")
+            console.print(f"    Perplexity : {ppl_result['perplexity']:.2f}")
+            console.print(f"    Tokens     : {ppl_result['tokens_evaluated']}")
 
     # TinyStories
     if "tinystories" in benchmark:
         if not tokenizer_path:
-            console.print("[red]--tokenizer required for tinystories benchmark[/red]")
+            console.print("[red]--tokenizer required for tinystories proxy check[/red]")
         else:
             from app.evaluation import eval_tinystories
             tokenizer = load_tokenizer(tokenizer_path)
@@ -373,9 +486,10 @@ def evaluate(
             ts_result = eval_tinystories(model, tokenizer, device=device, dtype=dtype)
             results["tinystories"] = ts_result
 
-            console.print("\n  [bold]TinyStories[/bold]")
-            console.print(f"    Coherence  : {ts_result['avg_coherence']:.4f}")
+            console.print("\n  [bold]TinyStories (proxy qualitative check)[/bold]")
+            console.print(f"    Proxy score: {ts_result['avg_coherence']:.4f}")
             console.print(f"    Samples    : {ts_result['num_samples']}")
+            console.print("    [dim]Nota: non è un benchmark TinyStories ufficiale.[/dim]")
             if ts_result.get("samples"):
                 console.print("\n    Sample generation:")
                 sample = ts_result["samples"][0]
@@ -384,7 +498,7 @@ def evaluate(
     # HellaSwag
     if "hellaswag-mini" in benchmark:
         if not tokenizer_path:
-            console.print("[red]--tokenizer required for hellaswag-mini benchmark[/red]")
+            console.print("[red]--tokenizer required for hellaswag-mini local check[/red]")
         else:
             from app.evaluation import eval_hellaswag_mini
             tokenizer = load_tokenizer(tokenizer_path)
@@ -394,7 +508,7 @@ def evaluate(
             )
             results["hellaswag-mini"] = hs_result
 
-            console.print("\n  [bold]HellaSwag-mini[/bold]")
+            console.print("\n  [bold]HellaSwag-mini (local-file dependent)[/bold]")
             if hs_result.get("accuracy") is not None:
                 console.print(f"    Accuracy   : {hs_result['accuracy']:.4f} ({hs_result['correct']}/{hs_result['total']})")
             else:
@@ -1122,17 +1236,22 @@ def data_prepare(
 
     tokenizer = load_tokenizer(tokenizer_dir)
 
-    metadata = prepare_dataset(
-        data_path=source,
-        tokenizer=tokenizer,
-        output_dir=output,
-        context_length=context_length,
-    )
+    try:
+        metadata = prepare_dataset(
+            data_path=source,
+            tokenizer=tokenizer,
+            output_dir=output,
+            context_length=context_length,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
     console.print("[green]Data prepared![/green]")
     console.print(f"  Total tokens : {metadata['total_tokens']:,}")
     console.print(f"  Shards       : {metadata['num_shards']}")
     console.print(f"  Vocab size   : {metadata['vocab_size']}")
+    console.print(f"  Token dtype  : {metadata.get('token_dtype', 'uint16')}")
     console.print(f"  Output       : {output}")
 
 

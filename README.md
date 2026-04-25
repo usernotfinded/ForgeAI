@@ -2,14 +2,35 @@
 
 ![ForgeAI Banner](./assets/forgeai-banner.png)
 
-**Train language models at any scale your hardware supports — from laptop to cluster.**
+**Local-first training workbench for small and mid-sized language models on consumer hardware.**
 
+ForgeAI is an open-source training orchestrator focused on sovereignty: you keep data, training runs, checkpoints, and evaluation local and auditable.
 
-ForgeAI is an open-source, MLX-first training orchestrator for language models. It adapts to whatever hardware you have — a MacBook Air, a gaming PC with a 4090, a rack of H100s — and configures the training pipeline accordingly. There are no artificial ceilings on model size. If you have the hardware and the patience, you can train it.
+The project is CLI-first and Apple Silicon oriented, with support for CUDA/MPS/CPU paths in the current engine. It is designed to be practical for real local experimentation, not to present itself as a finished frontier-scale training platform.
 
-ForgeAI is the Blender of AI training. Blender doesn't refuse to render a scene because your PC is slow — it estimates the time and lets you decide. ForgeAI doesn't refuse to train a 70B model because you have one GPU — it tells you it will take 14 months and lets you proceed if you accept the trade-off. Or you add more GPUs.
+---
 
-The core value proposition is **sovereignty**: you own the data, the training process, the weights, and the serving infrastructure. A 7B model trained on your proprietary documents can be more useful *to you* than Claude, because it is specialized and private. Nobody can revoke your access, change the terms of service, read your prompts, or decide what you're allowed to ask.
+## Documentation Map
+
+- [Current status](./STATUS.md)
+- [Roadmap](./ROADMAP.md)
+- [Contributing guide](./CONTRIBUTING.md)
+- [Architecture (current)](./docs/architecture.md)
+- [Stretch v1 details](./docs/stretch.md)
+- [Reproducible demo](./docs/reproducible-demo.md)
+
+---
+
+## Current Status (Verified vs Planned)
+
+Short version:
+
+- Implemented now: local CLI pipeline (plan/tokenizer/data/train/eval/chat), PyTorch training on CUDA/MPS/CPU, checkpointing/resume, `forge wizard`, and `forge stretch` v1 with `adapter_plus_manifest` (mapping artifact + deterministic manifest).
+- Experimental: local web UI and some lightweight eval/benchmark flows.
+- Planned: native MLX training, broader eval depth, more architectures, stronger orchestration.
+- Not yet implemented: full multi-node training and stretch `full_checkpoint` output mode.
+
+For details and tested environments, see [STATUS.md](./STATUS.md).
 
 ---
 
@@ -19,13 +40,13 @@ There are good tools for fine-tuning existing models. ForgeAI does something dif
 
 | Tool | Strength | ForgeAI's difference |
 |------|----------|---------------------|
-| **Axolotl** | Fine-tuning Llama/Mistral on CUDA | ForgeAI trains from scratch, MLX-first, scales to multi-node |
-| **Unsloth** | Fast LoRA fine-tuning | ForgeAI supports full pre-training, not just fine-tuning |
-| **MLX-LM** | Apple Silicon inference and fine-tuning | ForgeAI adds pre-training from scratch, auto-scaling, multi-architecture |
-| **nanoGPT** | Educational, minimal code | ForgeAI adds hardware auto-tuning, multi-GPU, cost estimation, evaluation |
-| **LLaMA-Factory** | Web UI for fine-tuning | ForgeAI covers the full pipeline: data → tokenizer → pre-training → eval → serving |
+| **Axolotl** | Fine-tuning on CUDA | ForgeAI focuses on local-first orchestration across planning + training + eval workflows |
+| **Unsloth** | Fast adapter fine-tuning | ForgeAI keeps the from-scratch path and a single local CLI workflow |
+| **MLX-LM** | Apple Silicon inference/fine-tuning runtime | ForgeAI complements it with planning, checkpoint lifecycle, and training/eval orchestration |
+| **nanoGPT** | Minimal educational trainer | ForgeAI adds CLI UX, checkpoint tooling, planning, and evaluative workflow integration |
+| **LLaMA-Factory** | UI-centric fine-tuning | ForgeAI is CLI-first and local-workbench oriented |
 
-**ForgeAI's position**: end-to-end sovereignty (data → tokenizer → training → evaluation → serving) with hardware-adaptive orchestration, from a single laptop to a multi-node cluster, MLX-first.
+**ForgeAI's position**: local-first sovereignty (data → tokenizer → training → evaluation → checkpoint reuse) with hardware-adaptive orchestration for consumer machines and small workstations.
 
 ---
 
@@ -35,24 +56,32 @@ Read this section before anything else.
 
 ### What You Can Realistically Train
 
-| Hardware | Realistic Max (from scratch) | Training Time | Example Use Case |
-|----------|------------------------------|---------------|------------------|
-| MacBook Air M4 16GB | 400M – 1B | Days – weeks | Personal assistant, domain chatbot, experimental research |
-| RTX 4090 24GB | 7B – 14B | Weeks – months | Home automation AI, private coding assistant |
-| 4× RTX 4090 | 14B – 30B | Months | Company domain expert, internal document Q&A |
-| 8× H100 80GB | 70B – 200B | Months – year | Sovereign AI for organizations, no cloud dependency |
+| Hardware | Conservative range today | Notes |
+|----------|--------------------------|-------|
+| Apple Silicon laptop (16–24GB unified memory) | ~50M to ~400M | Good fit for local experimentation and end-to-end pipeline validation |
+| Apple Silicon desktop (larger unified memory) | ~400M to ~1B | Feasible depending on context length, batch strategy, and runtime constraints |
+| Single high-end consumer GPU (e.g. 24GB VRAM) | ~400M to low-B range (experimental) | Configuration-sensitive; treat larger sizes as engineering experiments, not guaranteed defaults |
+| Multi-GPU / multi-node | Planned | See roadmap; not yet a verified default path |
 
 ### What to Expect from the Models
 
-- **400M model**: coherent text generation, basic Q&A on trained domain. Will not match ChatGPT. Can be highly specialized and surprisingly useful for narrow tasks.
-- **7B model**: genuinely useful for domain-specific work. Comparable to GPT-2 / early GPT-3 quality. Good for home automation, local RAG, code completion on your codebase.
-- **70B model**: approaching GPT-3.5 quality if trained well on good data. Requires serious compute and serious data curation.
+- Smaller models can be useful when the domain is narrow and data quality is high.
+- Strong results still depend on dataset quality, tokenization choices, and training stability.
+- This repository does not claim universal "frontier quality" from local runs.
 
 ### What ForgeAI Does NOT Do
 
 - Does not ship large pre-trained models. You train your own, or fine-tune existing open models.
 - Does not guarantee quality. Training is hard. Data quality, hyperparameters, and compute all matter. ForgeAI gives you the tools and guardrails, not the guarantees.
-- Does not make a 400M model "as good as Claude." That is physically impossible. But it makes a 400M model that knows YOUR domain better than Claude does.
+- Does not make small local models magically equivalent to top hosted frontier systems.
+- Does not provide arbitrary external-model adaptation in `forge wizard` v1. The adaptation path currently expects compatible ForgeAI-native checkpoints.
+
+## What ForgeAI Is Not Yet
+
+- Not a complete frontier-scale platform with proven multi-node training in this repository.
+- Not a "one click 70B+" product path.
+- Not a replacement for rigorous product-specific benchmarks.
+- Not a managed cloud service. It is a local toolchain.
 
 ---
 
@@ -60,15 +89,13 @@ Read this section before anything else.
 
 This is not about doomsday scenarios. It is about control over your AI stack in normal times.
 
-- **A medical research lab** has 300K patient records under HIPAA. Using OpenAI's API is a compliance risk they cannot take. They train a 14B model on their own 4-GPU server with ForgeAI. The data never leaves their network. The model is specialized in their diagnostic ontology and outperforms general-purpose models on their internal benchmarks.
+- **A medical or legal team** keeps sensitive documents on-prem and fine-tunes/evaluates local checkpoints without sending data to third-party APIs.
 
-- **A robotics hobbyist** running Home Assistant on a Raspberry Pi cluster has an RTX 4090 in their workstation. They train a 7B model to understand their Zigbee device topology, interpret Frigate NVR camera feeds, and learn household patterns. The model runs 24/7 on a Jetson Orin. No cloud, no subscription, no latency.
+- **A robotics or home-automation hobbyist** builds a domain assistant specialized for their own logs, device names, and workflows.
 
-- **A computational biologist** wants a domain model for protein function prediction. Trains a 14B model on curated UniProt entries and PubMed abstracts, iterates on tokenizer vocabulary and data mix. No API rate limits, no per-token billing, full control over the training corpus.
+- **A research user** runs repeated experiments on tokenizers, context lengths, and training settings with reproducible local artifacts.
 
 - **A hobbyist** with a MacBook Air wants to understand how language models actually work. Trains a 50M model from scratch on TinyStories, inspects every gradient, experiments with learning rate schedules, and reads the source code line by line.
-
-- **A national defense research institute** in a mid-size country needs sovereign AI capability without dependency on US or Chinese cloud providers. They operate an air-gapped 8× H100 cluster and use ForgeAI to train a 70B model on classified intelligence documents. This is a real and growing market.
 
 ForgeAI also works fully offline — but that is a side effect of being local, not the main pitch.
 
@@ -78,34 +105,31 @@ ForgeAI also works fully offline — but that is a side effect of being local, n
 
 ### Hardware-Adaptive Training
 
-ForgeAI auto-detects your hardware and configures optimal training settings. You do not need to know what FSDP is, what mixed-precision dtype to use, or how to set the batch size for your VRAM.
+ForgeAI auto-detects your hardware and proposes a conservative training plan. You do not need to hand-tune every low-level setting before a first run.
 
 ```bash
-$ forge plan --arch transformer --params 7B --data ./my-corpus/
+$ forge plan --arch transformer --params 400M --data ./my-corpus/
 ┌──────────────────────────────────────────────────────┐
 │  ForgeAI — Training Plan                            │
 │                                                      │
-│  Hardware   : NVIDIA RTX 4090 (24GB VRAM)            │
-│  Backend    : CUDA (PyTorch)                         │
-│  Model      : Transformer 7B (32 layers, GQA, RoPE) │
+│  Hardware   : Apple Silicon (MPS)                    │
+│  Backend    : MPS (PyTorch)                          │
+│  Model      : Transformer 400M                       │
 │  Precision  : bfloat16                               │
-│  Batch size : 4 (auto, grad accumulation: 8)         │
-│  Optimizer  : AdamW (8-bit via bitsandbytes)         │
-│  Tokens     : ~12B (estimated from corpus)           │
+│  Batch size : 4 (auto)                               │
+│  Optimizer  : AdamW                                  │
+│  Tokens     : ~8B (Chinchilla estimate)              │
 │                                                      │
-│  Estimated time  : ~45 days                          │
-│  Estimated cost  : ~€85 electricity (€0.30/kWh)     │
-│  Checkpoint size : ~14 GB per save                   │
-│  Total disk      : ~180 GB (checkpoints + data)      │
-│                                                      │
-│  Proceed? [y/N]                                      │
+│  Estimated time  : ~days to weeks                    │
+│  Estimated cost  : shown before training starts      │
+│  Checkpoint size : estimated from params             │
 └──────────────────────────────────────────────────────┘
 ```
 
 Key features:
 - **Cost and time estimation before training starts** — no surprises at hour 200
 - **Auto-configuration** — dtype, batch size, gradient accumulation, optimizer chosen for your hardware
-- **No artificial limits** — if you ask for 70B on a 4090, ForgeAI says "max ~14B on your VRAM, want to proceed with 14B?" instead of crashing
+- **Honest constraint reporting** — the planner highlights when a requested setup is likely unrealistic on detected hardware
 - **Override everything** — advanced users can set any parameter manually
 
 ### Pipeline
@@ -136,7 +160,7 @@ Key features:
 `forge stretch` persistently extends the context window of an **existing compatible model**.
 
 - Method v1: **YaRN scaling only**
-- Persistence v1: **`adapter_plus_manifest` only** (not `full_checkpoint`)
+- Persistence v1: **`adapter_plus_manifest` only** (not `full_checkpoint`): source checkpoint copy + YaRN mapping artifact + deterministic manifest
 - The target context length must be **strictly greater** than the model's native context
 - Validation v1 is **local/proxy**: `forge stretch` includes specific checks for its own workflow, but the repository as a whole does not yet feature a general, reusable long-context benchmark suite (like Needle-in-a-Haystack) in the official `forge eval` module.
 
@@ -175,16 +199,16 @@ ForgeAI is a local, single-user tool. No auth service, no API gateway, no micros
 │     ┌────────────┼────────────┐                  │
 │     │            │            │                  │
 │   ┌─▼──┐   ┌────▼──────┐  ┌──▼────┐             │
-│   │MLX │   │CUDA/FSDP  │  │ CPU   │             │
+│   │MLX │   │   CUDA    │  │ CPU   │             │
 │   └────┘   └───────────┘  └───────┘             │
 └──────────────────────────────────────────────────┘
 ```
 
 | Component | Role |
 |-----------|------|
-| **forge (CLI)** | `forge train`, `forge eval`, `forge serve`, `forge plan` — scriptable, no UI required |
+| **forge (CLI)** | `forge plan`, `forge train`, `forge eval`, `forge eval-compare`, `forge chat`, `forge wizard`, `forge stretch` |
 | **forge-engine** | Python core: architectures, tokenizer, training loop, evaluation, checkpoints, hardware auto-tuning |
-| **web (local UI)** | Optional Next.js dashboard (MVP): basic training curves and cost tracking (chat and eval routes are still WIP) |
+| **web (local UI)** | Optional Next.js dashboard (experimental MVP): basic monitoring + helper pages for eval/chat/hardware |
 | **Inference** | Delegated to `mlx-lm` (Apple Silicon) and `llama.cpp` (cross-platform) for v0.1 |
 
 ---
@@ -206,7 +230,7 @@ Decoder-only Transformer
   └── RMSNorm → LM head (weight-tied to embedding)
 ```
 
-The implementation in `forge-engine/architectures/transformer.py` is ~300 lines with inline comments explaining each design decision. The codebase is structured to be pluggable — adding an architecture means implementing a `BaseModel` interface and registering it.
+The implementation in `apps/forge-engine/app/architectures/transformer.py` is compact and heavily commented. The codebase is structured to be pluggable — adding an architecture means implementing a `BaseModel` interface and registering it.
 
 ### Architecture Comparison
 
@@ -223,26 +247,25 @@ Only one additional architecture will be added in v1.0, chosen based on communit
 
 ## Backend
 
-MLX is the primary development target. CUDA is fully supported but not the development focus. This is a deliberate niche choice — Axolotl, Unsloth, and LLaMA-Factory already dominate CUDA fine-tuning.
+ForgeAI is Apple Silicon focused and MLX-oriented, but the current training implementation is PyTorch-based.
 
-| Priority | Backend | Trigger | Training | Inference | Multi-GPU |
-|----------|---------|---------|----------|-----------|-----------|
-| 1 | **MLX** | Apple Silicon + `mlx` installed | ✅ Native | via `mlx-lm` | N/A (unified memory) |
-| 2 | **CUDA** | NVIDIA GPU | ✅ PyTorch | via `llama.cpp` | ✅ FSDP (v1.0) |
-| 3 | **MPS** | Apple Silicon, no MLX | ⚠ Slower | via `llama.cpp` | N/A |
-| 4 | **CPU** | No GPU | ❌ Too slow for >10M | via `llama.cpp` | N/A |
+| Backend | Current training status | Inference integration | Notes |
+|---------|-------------------------|-----------------------|-------|
+| **CUDA (PyTorch)** | ✅ Implemented | `llama.cpp` | Best-supported training path today |
+| **MPS (PyTorch on Apple Silicon)** | ✅ Implemented | `llama.cpp` | Works locally on Mac; performance depends on memory pressure |
+| **MLX** | 🚧 Planned/in progress for native training | `mlx-lm` | MLX package detection exists; native MLX training loop is not yet complete |
+| **CPU (PyTorch)** | ✅ Implemented (slow) | `llama.cpp` | Useful for smoke tests and debugging |
 
-Auto-detection runs at startup: backend, dtype (bfloat16 on MLX/Ampere+, float16 on older CUDA, float32 on CPU), and recommended model size are set automatically.
+Auto-detection runs at startup and selects backend plus dtype recommendation. The recommendation is heuristic and should be treated as a starting point.
 
 ### Hardware Examples
 
-| Hardware | Backend | Max Model (training) | Notes |
-|----------|---------|---------------------|-------|
-| MacBook Air M4 16GB | MLX | 400M – 1B | Development machine. All v0.1 claims tested here. |
-| Mac Studio M2 Ultra 192GB | MLX | 7B – 14B | Unified memory makes large models feasible. |
-| RTX 4090 24GB | CUDA | 7B – 14B | Single GPU, gradient checkpointing required for 14B. |
-| 4× RTX 4090 | CUDA + FSDP | 14B – 30B | v1.0 target. |
-| 8× H100 80GB | CUDA + FSDP | 70B – 200B | v2.0 target, multi-node. |
+| Hardware | Backend | Practical range (today) | Notes |
+|----------|---------|-------------------------|-------|
+| MacBook Air/Pro (Apple Silicon) | MPS (training) + MLX tooling | 50M–400M commonly practical | Good for local experiments and fast iteration |
+| Mac Studio class (higher unified memory) | MPS (training) + MLX tooling | 400M–1B commonly practical | Larger runs are possible but configuration-sensitive |
+| RTX 4090 24GB class | CUDA | 400M to low-B range (experimental) | Depends strongly on context length and batch strategy |
+| Multi-GPU servers | Planned | Planned | See roadmap; not yet a verified default path |
 
 ---
 
@@ -276,11 +299,11 @@ Training without evaluation is flying blind. ForgeAI treats evaluation as a firs
 
 ### Offline Benchmarks
 
-- **TinyStories eval** — coherence score on held-out samples (~2 min, good for models <1B)
-- **HellaSwag-mini** — 1000-sample subset, 0-shot accuracy (useful for ≥100M params)
-- **ARC-easy** (optional) — common-sense reasoning, lightweight
+- **TinyStories proxy check** — qualitative generation/repetition heuristic on fixed prompts
+- **HellaSwag-mini local check** — optional 0-shot accuracy only when you provide a local JSONL file (`--hellaswag-data`)
+- **Perplexity** remains the primary local quantitative metric in v0.1
 
-These benchmarks are not impressive by frontier standards. They are useful for comparing your runs against each other, catching regressions, and confirming that training actually converged.
+These checks are useful for comparing your runs, catching regressions, and spotting obvious failure modes. They are not a substitute for application-specific benchmark suites.
 
 ### Cost Tracking
 
@@ -292,10 +315,10 @@ These benchmarks are not impressive by frontier standards. They are useful for c
 
 Train two models with different configs and compare metrics side by side:
 ```bash
-forge eval compare ./checkpoints/run-a/latest ./checkpoints/run-b/latest
+forge eval-compare ./checkpoints/run-a/latest ./checkpoints/run-b/latest
 ```
 
-Exports comparison as markdown, viewable in the web UI or as a file.
+Exports comparison as markdown, viewable in the experimental web UI or as a file.
 
 ---
 
@@ -304,26 +327,31 @@ Exports comparison as markdown, viewable in the web UI or as a file.
 ### Requirements
 
 - Python 3.11+
-- `pip install mlx mlx-lm` (Apple Silicon) or `pip install torch` (CUDA)
+- `pip install -e ./apps/forge-engine`
+- Optional extras:
+  - Apple Silicon inference tooling: `pip install mlx mlx-lm`
+  - CUDA fine-tuning helpers/runtime extras as needed for your environment
 - Node.js 20+ (optional, for the local web UI)
 
 ### Install
 
 ```bash
-git clone https://github.com/usernotfounded/forgeai.git
-cd forgeai
-pip install -e apps/forge-engine
+git clone https://github.com/usernotfinded/ForgeAI.git
+cd ForgeAI
+pip install -e ./apps/forge-engine
 ```
 
 ### Chat with a pre-existing model
 
 ```bash
-# Import an open-source model into ForgeAI format
-forge model pull smollm-135m
+# Download a compatible open model snapshot (Hugging Face files)
+forge model pull smollm-135m --skip-convert
 
-# Chat via mlx-lm
-forge chat smollm-135m
+# Apple Silicon path (mlx-lm): chat directly from HF folder
+forge chat ./models/smollm-135m-hf --engine mlx
 ```
+
+If you want to use the converted ForgeAI checkpoint path, run `forge model pull smollm-135m` (without `--skip-convert`) and provide a compatible tokenizer when using the PyTorch chat engine.
 
 ### Train from scratch
 
@@ -331,11 +359,11 @@ forge chat smollm-135m
 # 1. See what your hardware can handle
 forge plan --arch transformer --params 400M --data ./my-corpus/
 
-# 2. Prepare data
-forge data prepare ./my-corpus/ --output ./data/processed/
+# 2. Train a tokenizer on raw text
+forge tokenizer train --data ./my-corpus/ --vocab-size 8000 --output ./tokenizers/my-tokenizer/
 
-# 3. Train a tokenizer
-forge tokenizer train --data ./data/processed/ --vocab-size 8000
+# 3. Prepare tokenized shards
+forge data prepare ./my-corpus/ --output ./data/processed/ --tokenizer ./tokenizers/my-tokenizer/
 
 # 4. Train
 forge train \
@@ -346,18 +374,23 @@ forge train \
   --output ./checkpoints/my-run/
 
 # 5. Evaluate
-forge eval --checkpoint ./checkpoints/my-run/latest --benchmark tinystories hellaswag-mini
+forge eval ./checkpoints/my-run/latest --benchmark perplexity --data ./data/processed/ --tokenizer ./tokenizers/my-tokenizer/
+
+# Optional local checks:
+# forge eval ./checkpoints/my-run/latest --benchmark tinystories --tokenizer ./tokenizers/my-tokenizer/
+# forge eval ./checkpoints/my-run/latest --benchmark hellaswag-mini --hellaswag-data ./benchmarks/hellaswag_val.jsonl --tokenizer ./tokenizers/my-tokenizer/
 
 # 6. Chat
-forge chat ./checkpoints/my-run/latest
+forge chat ./checkpoints/my-run/latest --tokenizer ./tokenizers/my-tokenizer/ --engine pytorch
 ```
 
 ### Local Web UI (MVP)
 
 ```bash
 cd apps/web && npm install && npm run dev
-# Open http://localhost:3000 — view training curves, run evaluations, chat
-# Note: The dashboard and API are functional, but some secondary pages (e.g. /eval) are still WIP.
+# Open http://localhost:3000
+# Status: experimental/prototype local dashboard (not production-ready)
+# Note: install/test depends on local npm install; no lockfile is committed in this repository yet.
 ```
 
 ### Minimal Smoke Test
@@ -368,43 +401,35 @@ If you just cloned the repository, you can verify that the core engine works on 
 ./scripts/smoke_test.sh
 ```
 
+Reproducible demo details (artifacts, expected outputs, limits):
+- [`docs/reproducible-demo.md`](./docs/reproducible-demo.md)
+
+### Development Checks
+
+The repository includes a lightweight CPU-only quality gate used in CI.
+Contributor workflow details are in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+```bash
+# 1) Install forge-engine in editable mode + lightweight test deps
+python -m pip install -e ./apps/forge-engine --no-deps
+python -m pip install pytest ruff typer rich numpy tqdm pydantic fastapi uvicorn tokenizers safetensors
+
+# 2) Run the same checks used by CI
+./scripts/dev_checks.sh
+```
+
 ---
 
 ## Project Structure
 
-```
-forgeai/
-├── apps/
-│   ├── forge-engine/              # Python core (pip install -e .)
-│   │   ├── app/
-│   │   │   ├── architectures/     # Transformer (v0.1) + registry for future archs
-│   │   │   │   ├── transformer.py # GPT-style decoder-only (~300 lines, commented)
-│   │   │   │   └── registry.py    # Architecture registry + preset configs
-│   │   │   ├── core/
-│   │   │   │   └── backend.py     # Auto-detect MLX / CUDA / MPS / CPU
-│   │   │   ├── tokenizer/         # BPE and SentencePiece training
-│   │   │   ├── training/          # Training loop, optimizer, scheduler, auto-tuning
-│   │   │   ├── evaluation/        # Perplexity, HellaSwag-mini, TinyStories eval
-│   │   │   ├── data/              # Dataset loading, preprocessing, batching
-│   │   │   └── checkpoints/       # Save / load / convert / import from HF
-│   │   └── cli/                   # forge CLI entry points
-│   └── web/                       # Local Next.js dashboard (optional)
-│       └── src/
-│           ├── app/               # Training monitor, loss curves, cost tracker, chat
-│           └── components/
-├── papers/                        # Research papers reading list (see papers/README.md)
-│   ├── architectures/
-│   ├── training/
-│   ├── alignment/
-│   ├── tokenization/
-│   ├── inference/
-│   └── labs/                      # By lab: deepseek, moonshotai, google, meta, mistral
-├── docs/
-│   └── adr/                       # Architecture Decision Records
-├── scripts/                       # Dev helpers
-├── .gitignore
-└── turbo.json
-```
+- `apps/forge-engine/`: Python core + CLI (`forge`) for planning, training, evaluation, wizard, and stretch flows.
+- `apps/web/`: optional local web UI (MVP).
+- `docs/`: feature docs and architecture decision records.
+- `scripts/`: reproducible smoke test and developer checks.
+- `papers/`: curated reading list for architectures/training/eval topics.
+
+Detailed architecture and module map:
+- [`docs/architecture.md`](./docs/architecture.md)
 
 ---
 
@@ -418,72 +443,16 @@ PDFs are gitignored — they are already compressed, zipping them saves only 5�
 
 ## Roadmap
 
-Timelines assume P90 (worst-case) planning. Each phase has a binary "done" definition and a kill-switch condition.
+ForgeAI uses a staged roadmap focused on shipping verifiable increments:
 
----
+- Phase 0: reliability and smoke tests
+- Phase 1: local training workflow hardening
+- Phase 2: Apple Silicon / MLX-native improvements
+- Phase 3: evaluation and model-quality depth
+- Phase 4: UI and advanced orchestration
 
-### Phase 1 (v0.1) — Single-GPU Training
-
-**Timeline**: 9 months (P50: 6 months, P90: 12 months)
-
-**Done when**: A Transformer model can be trained from scratch on TinyStories, reach <50 perplexity on the validation set, and generate grammatical text. The core path (data → tokenizer → train → eval → chat) works end-to-end as a technical MVP on a MacBook Air M4 16GB and on a single CUDA GPU, with minimal manual configuration required.
-
-**Kill-switch**: If training loop is not functional on both MLX and CUDA by month 12, pivot to fine-tuning-only tool and drop from-scratch pre-training.
-
-| Deliverable | Status |
-|-------------|--------|
-| Transformer architecture (RoPE, GQA, SwiGLU) | ✅ |
-| Architecture registry + presets | ✅ |
-| Backend auto-detection (MLX / CUDA / MPS / CPU) | ✅ |
-| BPE tokenizer training | ✅ |
-| Training loop (MLX native + PyTorch CUDA) | ✅ (PyTorch; MLX native planned) |
-| Mixed precision + gradient checkpointing | ✅ |
-| Validation perplexity tracking | ✅ |
-| Checkpoint save / load / resume | ✅ |
-| Hardware auto-tuning (batch size, dtype, optimizer) | ✅ |
-| `forge plan` — cost/time estimation | ✅ |
-| `forge train` CLI | ✅ |
-| `forge eval` — TinyStories + HellaSwag-mini | ✅ |
-| `forge chat` via `mlx-lm` / `llama.cpp` | ✅ |
-| Basic web UI (loss curves, chat) | ✅ (Dashboard & API present; secondary pages WIP) |
-
----
-
-### Phase 2 (v1.0) — Multi-GPU + Fine-tuning + Second Architecture
-
-**Timeline**: +12 months after v0.1 (P50: +9 months, P90: +18 months)
-
-**Done when**: Multi-GPU training (FSDP, 2–8 GPUs) works end-to-end. LoRA fine-tuning works on a redistributed model on 8GB unified RAM. A second architecture (Mamba or RWKV) passes the same end-to-end test as Transformer. A 7B model is successfully trained on a multi-GPU setup.
-
-**Kill-switch**: If multi-GPU FSDP is not working 18 months into Phase 2, stay single-GPU and focus on quality, UX, and fine-tuning depth instead of scaling.
-
-| Deliverable | Status |
-|-------------|--------|
-| Multi-GPU training (FSDP, 2–8 CUDA GPUs) | ⬜ |
-| LoRA / QLoRA fine-tuning (MLX + CUDA) | ⬜ |
-| Second architecture (Mamba or RWKV, based on community demand) | ⬜ |
-| Model converter (HuggingFace → ForgeAI format) | ✅ |
-| `forge model pull` for open-source models | ✅ |
-| Advanced cost estimation (electricity, GPU-hours, disk) | ✅ |
-| Model comparison mode (`forge eval compare`) | ✅ |
-| 7B model trained on multi-GPU and evaluated | ⬜ |
-
----
-
-### Phase 3 (v2.0+) — Multi-Node + Production Hardening
-
-**Done when**: Training can span multiple machines. Fault tolerance handles node failures mid-training. At least 3 external developers can clone the repo and complete a training run on their own data within 2 hours without asking for help.
-
-**Kill-switch**: If multi-node is not feasible with the contributor base by v2.0 target, scope down to single-server multi-GPU and focus on documentation and usability.
-
-| Deliverable | Status |
-|-------------|--------|
-| Multi-node training (2+ machines) | ⬜ |
-| Fault tolerance (checkpoint resume on node failure) | ⬜ |
-| Third architecture (community-driven) | ⬜ |
-| End-to-end documentation and tutorials | ⬜ |
-| GitHub CI (lint, unit tests, smoke test) | 🚧 (Local smoke test script added) |
-| 2-hour onboarding benchmark (3 external testers) | ⬜ |
+Full details:
+- [`ROADMAP.md`](./ROADMAP.md)
 
 ---
 
@@ -549,7 +518,7 @@ ForgeAI is a tool. What you train on is your responsibility. Many jurisdictions 
 
 **Q: How is this different from just running nanoGPT?**
 
-nanoGPT is a minimal educational implementation (~300 lines). ForgeAI builds on the same pedagogical spirit but adds: hardware auto-detection and configuration, cost/time estimation before training, evaluation benchmarks, checkpoint management, a local web UI for monitoring, and a roadmap toward multi-GPU scaling. Think of it as nanoGPT grown up into a usable tool.
+nanoGPT is a minimal educational implementation (~300 lines). ForgeAI builds on the same pedagogical spirit but adds: hardware auto-detection and configuration, cost/time estimation before training, lightweight local evaluation checks, checkpoint management, an experimental local web UI for monitoring, and a roadmap toward broader orchestration. Think of it as nanoGPT grown up into a usable tool.
 
 ---
 

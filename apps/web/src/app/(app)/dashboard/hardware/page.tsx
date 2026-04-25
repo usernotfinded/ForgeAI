@@ -46,19 +46,19 @@ export default function HardwarePage() {
             {[
               {
                 name: "forge-nano",
-                params: "~6M",
+                params: "~50M",
                 desc: "Fast iteration, prototyping, testing on any hardware",
                 vram: "< 1 GB",
               },
               {
-                name: "forge-micro",
-                params: "~85M",
+                name: "forge-tiny",
+                params: "~120M",
                 desc: "Balanced quality and speed for local research",
                 vram: "2–4 GB",
               },
               {
                 name: "forge-small",
-                params: "~350M",
+                params: "~310M",
                 desc: "Higher quality outputs, needs a capable GPU",
                 vram: "8+ GB",
               },

@@ -33,7 +33,7 @@ class ReconstructedStretchVariant:
         points = self.adapter_positions
         mapped = self.adapter_mapped_positions
         if not points or not mapped:
-            raise ValueError("Mappa adapter vuota.")
+            raise ValueError("Mappa position-map vuota.")
 
         pos_value = float(position)
         if pos_value <= points[0]:
@@ -123,7 +123,7 @@ def run_minimal_reconstruction_demo(
     reconstructed: ReconstructedStretchVariant,
 ) -> dict[str, Any]:
     """
-    Minimal 'used for real' demo:
+    Minimal deterministic demo (non model inference):
     - builds a long synthetic sequence with distant facts
     - reconstructs mapped positions via adapter table
     - simulates fixed attention budget in mapped space

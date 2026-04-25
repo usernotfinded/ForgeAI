@@ -7,8 +7,10 @@ recommends hardware configuration before the user starts a run.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 from rich.table import Table
@@ -71,6 +73,7 @@ class TrainingPlan:
     checkpoint_size_gb: float
     recommended_dtype: str
     recommended_batch_size: int
+    data_inspection: dict[str, Any]
     warnings: list[str]
 
     def print_summary(self, console: Console) -> None:
@@ -90,6 +93,20 @@ class TrainingPlan:
         table.add_row("Architecture", self.arch)
         table.add_row("Parameters", f"{self.params / 1e6:.0f}M ({self.params / 1e9:.2f}B)")
         table.add_row("Tokens (Chinchilla optimal)", f"~{self.estimated_tokens / 1e9:.1f}B")
+        table.add_row("Data path", self.data_inspection.get("resolved_path", self.data_path))
+        if bool(self.data_inspection.get("prepared_metadata_found", False)):
+            prepared_tokens = self.data_inspection.get("prepared_total_tokens")
+            prepared_shards = self.data_inspection.get("prepared_num_shards")
+            prepared_context = self.data_inspection.get("prepared_context_length")
+            prepared_dtype = self.data_inspection.get("prepared_token_dtype")
+            if isinstance(prepared_tokens, int):
+                table.add_row("Prepared dataset tokens", f"{prepared_tokens:,}")
+            if isinstance(prepared_shards, int):
+                table.add_row("Prepared shards", str(prepared_shards))
+            if isinstance(prepared_context, int):
+                table.add_row("Prepared context length", str(prepared_context))
+            if isinstance(prepared_dtype, str) and prepared_dtype:
+                table.add_row("Prepared token dtype", prepared_dtype)
         table.add_row("Dtype", self.recommended_dtype)
         table.add_row("Batch size (auto)", str(self.recommended_batch_size))
         table.add_row("", "")
@@ -120,6 +137,7 @@ def estimate_training(
     Estimate training time and cost for a given model and hardware.
     Uses Chinchilla scaling laws for token count estimation.
     """
+    data_inspection = inspect_data_path(data_path)
     n_params = _parse_params(params)
     optimal_tokens = _chinchilla_optimal_tokens(n_params)
     flops_per_token = _estimate_flops_per_token(n_params)
@@ -167,6 +185,16 @@ def estimate_training(
             f"Estimated training time is {estimated_hours / 24:.0f} days. "
             "Consider reducing model size or token count."
         )
+    warnings.append(
+        "Planner outputs are heuristic estimates based on model size + backend throughput. "
+        "Use prepared dataset metadata as guidance, not as a guarantee."
+    )
+    prepared_tokens = data_inspection.get("prepared_total_tokens")
+    if isinstance(prepared_tokens, int) and prepared_tokens > 0 and prepared_tokens < optimal_tokens:
+        warnings.append(
+            f"Prepared dataset has ~{prepared_tokens / 1e6:.1f}M tokens, below "
+            f"the Chinchilla target (~{optimal_tokens / 1e6:.1f}M)."
+        )
 
     return TrainingPlan(
         arch=arch,
@@ -182,5 +210,74 @@ def estimate_training(
         checkpoint_size_gb=checkpoint_size_gb,
         recommended_dtype=backend.recommended_dtype,
         recommended_batch_size=batch_size,
+        data_inspection=data_inspection,
         warnings=warnings,
     )
+
+
+def inspect_data_path(data_path: str | Path) -> dict[str, Any]:
+    path = Path(data_path).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"Dataset path not found: {path}")
+
+    resolved = path.resolve()
+    inspection: dict[str, Any] = {
+        "resolved_path": str(resolved),
+        "path_kind": "directory" if resolved.is_dir() else "file",
+        "prepared_metadata_found": False,
+        "prepared_metadata_path": None,
+        "prepared_total_tokens": None,
+        "prepared_num_shards": None,
+        "prepared_context_length": None,
+        "prepared_token_dtype": None,
+    }
+
+    metadata_path = _resolve_prepared_metadata_path(resolved)
+    if metadata_path is None:
+        return inspection
+
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        inspection["prepared_metadata_path"] = str(metadata_path.resolve())
+        inspection["prepared_metadata_error"] = "invalid_json"
+        return inspection
+
+    if not isinstance(payload, dict):
+        inspection["prepared_metadata_path"] = str(metadata_path.resolve())
+        inspection["prepared_metadata_error"] = "invalid_payload_type"
+        return inspection
+
+    inspection["prepared_metadata_found"] = True
+    inspection["prepared_metadata_path"] = str(metadata_path.resolve())
+    inspection["prepared_total_tokens"] = _coerce_optional_int(payload.get("total_tokens"))
+    inspection["prepared_num_shards"] = _coerce_optional_int(payload.get("num_shards"))
+    inspection["prepared_context_length"] = _coerce_optional_int(payload.get("context_length"))
+    token_dtype = payload.get("token_dtype")
+    if isinstance(token_dtype, str) and token_dtype.strip():
+        inspection["prepared_token_dtype"] = token_dtype.strip().lower()
+    return inspection
+
+
+def _resolve_prepared_metadata_path(path: Path) -> Path | None:
+    if path.is_dir():
+        candidate = path / "metadata.json"
+        return candidate if candidate.exists() else None
+
+    if path.is_file() and path.name == "metadata.json":
+        return path
+
+    if path.is_file() and path.suffix == ".bin":
+        candidate = path.parent / "metadata.json"
+        return candidate if candidate.exists() else None
+
+    return None
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None

@@ -8,7 +8,7 @@ for efficient training. Supports:
   - JSONL (each line: {"text": "..."})
   - Directories of mixed formats
 
-The output is a set of .bin files (uint16 numpy arrays of token IDs) that can
+The output is a set of .bin files (uint32 numpy arrays of token IDs) that can
 be memory-mapped during training for zero-copy data loading.
 """
 
@@ -23,6 +23,11 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from tokenizers import Tokenizer
+
+_TOKEN_DTYPE_MAP: dict[str, Any] = {
+    "uint16": np.uint16,
+    "uint32": np.uint32,
+}
 
 
 # ── Text Extraction ──────────────────────────────────────────────────────────
@@ -79,11 +84,12 @@ def prepare_dataset(
     context_length: int = 2048,
     shard_size: int = 100_000_000,  # ~100M tokens per shard
     eos_token_id: int | None = None,
+    token_dtype: str = "uint32",
 ) -> dict[str, Any]:
     """
     Tokenize a corpus and save as binary shards.
 
-    Each shard is a numpy .bin file of uint16 token IDs. Documents are
+    Each shard is a numpy .bin file of token IDs. Documents are
     concatenated with EOS tokens between them, then chunked into
     context_length-sized sequences.
 
@@ -94,12 +100,16 @@ def prepare_dataset(
         context_length: Sequence length for training
         shard_size:     Max tokens per shard file
         eos_token_id:   EOS token ID (auto-detected if None)
+        token_dtype:    Token dtype for shard storage (default: uint32)
 
     Returns:
         dict with metadata (total_tokens, num_shards, shard_paths)
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    _validate_prepare_params(context_length=context_length, shard_size=shard_size)
+    dtype_name, dtype = _resolve_token_dtype(token_dtype)
+    dtype_max = int(np.iinfo(dtype).max)
 
     if eos_token_id is None:
         eos_token_id = tokenizer.token_to_id("<|eos|>")
@@ -107,17 +117,22 @@ def prepare_dataset(
             eos_token_id = tokenizer.token_to_id("</s>")
         if eos_token_id is None:
             eos_token_id = 0  # fallback
+    if int(eos_token_id) > dtype_max:
+        raise ValueError(
+            f"EOS token id {eos_token_id} exceeds {dtype_name} capacity ({dtype_max})."
+        )
 
     all_tokens: list[int] = []
     shard_idx = 0
     shard_paths: list[str] = []
     total_tokens = 0
+    docs_processed = 0
 
     def _flush_shard(tokens: list[int]) -> None:
         nonlocal shard_idx, shard_paths, total_tokens
         if not tokens:
             return
-        arr = np.array(tokens, dtype=np.uint16)
+        arr = np.array(tokens, dtype=dtype)
         shard_path = output_dir / f"shard_{shard_idx:04d}.bin"
         arr.tofile(str(shard_path))
         shard_paths.append(str(shard_path))
@@ -125,8 +140,16 @@ def prepare_dataset(
         shard_idx += 1
 
     for doc in iter_documents(data_path):
+        docs_processed += 1
         encoded = tokenizer.encode(doc)
         token_ids = encoded.ids
+        if token_ids:
+            max_token_id = max(token_ids)
+            if int(max_token_id) > dtype_max:
+                raise ValueError(
+                    f"Token id {max_token_id} exceeds {dtype_name} capacity ({dtype_max}). "
+                    "Use a larger shard dtype."
+                )
         all_tokens.extend(token_ids)
         all_tokens.append(eos_token_id)
 
@@ -139,6 +162,12 @@ def prepare_dataset(
     if all_tokens:
         _flush_shard(all_tokens)
 
+    if total_tokens == 0 or docs_processed == 0:
+        raise ValueError(
+            "Dataset vuoto: nessun token valido prodotto. "
+            "Controlla path, formato file e contenuto testuale."
+        )
+
     # Save metadata
     metadata = {
         "total_tokens": total_tokens,
@@ -147,6 +176,8 @@ def prepare_dataset(
         "context_length": context_length,
         "vocab_size": tokenizer.get_vocab_size(),
         "eos_token_id": eos_token_id,
+        "token_dtype": dtype_name,
+        "documents_processed": docs_processed,
     }
 
     meta_path = output_dir / "metadata.json"
@@ -169,15 +200,24 @@ class ShardedTokenDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
 
     def __init__(self, data_dir: str | Path, context_length: int = 2048):
         self.data_dir = Path(data_dir)
+        if context_length <= 1:
+            raise ValueError("context_length must be > 1 for next-token training.")
         self.context_length = context_length
 
         # Load metadata
         meta_path = self.data_dir / "metadata.json"
         if meta_path.exists():
-            with open(meta_path) as f:
+            with open(meta_path, encoding="utf-8") as f:
                 self.metadata = json.load(f)
         else:
             self.metadata = None
+
+        token_dtype_name = "uint16"
+        if isinstance(self.metadata, dict):
+            raw_dtype = self.metadata.get("token_dtype")
+            if isinstance(raw_dtype, str) and raw_dtype.strip():
+                token_dtype_name = raw_dtype.strip().lower()
+        _, token_dtype = _resolve_token_dtype(token_dtype_name)
 
         # Find all shard files
         self.shard_paths = sorted(self.data_dir.glob("shard_*.bin"))
@@ -189,7 +229,7 @@ class ShardedTokenDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.shard_offsets: list[int] = []  # cumulative token offsets
         offset = 0
         for sp in self.shard_paths:
-            mmap = np.memmap(str(sp), dtype=np.uint16, mode="r")
+            mmap = np.memmap(str(sp), dtype=token_dtype, mode="r")
             self.shards.append(mmap)
             self.shard_offsets.append(offset)
             offset += len(mmap)
@@ -269,3 +309,18 @@ def create_dataloader(
         pin_memory=True,
         drop_last=True,
     )
+
+
+def _resolve_token_dtype(token_dtype: str) -> tuple[str, Any]:
+    normalized = token_dtype.strip().lower()
+    if normalized not in _TOKEN_DTYPE_MAP:
+        allowed = ", ".join(sorted(_TOKEN_DTYPE_MAP.keys()))
+        raise ValueError(f"Unsupported token dtype '{token_dtype}'. Allowed: {allowed}.")
+    return normalized, _TOKEN_DTYPE_MAP[normalized]
+
+
+def _validate_prepare_params(context_length: int, shard_size: int) -> None:
+    if context_length <= 1:
+        raise ValueError("context_length must be > 1.")
+    if shard_size <= 0:
+        raise ValueError("shard_size must be > 0.")

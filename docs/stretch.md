@@ -6,7 +6,7 @@
 
 In v1:
 - usa **un solo metodo tecnico**: `YaRN scaling`
-- produce una variante persistente in formato **`adapter_plus_manifest`**
+- produce una variante persistente in formato **`adapter_plus_manifest`** (mapping artifact + manifest deterministico)
 - non promette "memoria magica" o "modello più intelligente"
 
 `forge stretch` non trasforma qualunque modello in 128k con un click: valuta compatibilità, propone target realistici, chiede consenso stratificato e valida i trade-off.
@@ -49,10 +49,11 @@ Esempio:
 La variante finale include:
 - modello base tracciato
 - metadati aggiornati
-- adapter reale prodotto dal processo stretch
+- artefatto di mapping YaRN (`stretch_adapter.bin`) prodotto dal processo stretch
 - manifest deterministico con hash e passi di ricostruzione
 
-Questo significa che la variante non è solo "config aggiornata": c'è un artefatto reale (`stretch_adapter.bin`) più manifest sufficiente a ricostruzione non ambigua.
+Questo significa che la variante non è solo "config aggiornata": c'è un artefatto persistente (`stretch_adapter.bin`) più manifest sufficiente a ricostruzione non ambigua.
+In v1, l'artefatto è un mapping di posizioni RoPE per ricostruzione/validazione locale; non è un adapter PEFT general-purpose.
 
 ## 6) Struttura artefatti output
 
@@ -73,7 +74,7 @@ Significato file:
 - `metadata.json`: config modello + sezione stretch aggiornata
 - `stretch_metadata.json`: metadati stretch operativi (profilo, target, tipo artefatto, adapter)
 - `stretch_manifest.json`: manifest deterministico (hash input/output, passi ricostruzione)
-- `stretch_adapter.bin`: artefatto reale generato da YaRN v1
+- `stretch_adapter.bin`: artefatto di mapping YaRN v1 (non `full_checkpoint`, non adapter PEFT general-purpose)
 - `validation_report.json`: esito validazione (strutturale, persistenza, short, long, ricostruzione)
 
 Artefatti sessione:
@@ -97,6 +98,10 @@ Entry point Python già disponibile:
 - hash adapter
 - blocco `deterministic_reconstruction`
 - coerenza contesti e metodo (`yarn`)
+- coerenza del mapping artifact con gli hash dichiarati
+
+Nota:
+- la funzione di ricostruzione v1 restituisce una vista deterministica della variante (metadata + mapping), non genera un nuovo `model.pt` distinto.
 
 ### Esempio uso
 
@@ -200,8 +205,10 @@ Mostra anche:
 `forge stretch` v1 garantisce:
 - una variante long-context persistente con tracciabilità
 - controlli tecnici concreti su integrità, persistenza e comportamento proxy
+- ricostruzione deterministica basata su metadata + mapping artifact
 
 `forge stretch` v1 **non** garantisce:
 - miglioramento generale del modello su tutti i task
 - equivalenza a benchmark semantici completi
 - compatibilità universale con ogni checkpoint
+- produzione di `full_checkpoint` già pronto in v1

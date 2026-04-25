@@ -439,7 +439,7 @@ def _step_5_review_consent(
 
     if not non_interactive:
         proceed = typer.confirm(
-            "Confermi l'esecuzione persistente? (v1 produce adapter + manifest, non full checkpoint)",
+            "Confermi l'esecuzione persistente? (v1 produce mapping artifact + manifest, non full checkpoint)",
             default=True,
         )
         if not proceed:
@@ -494,7 +494,8 @@ def _step_6_execute(
         console.print(f"Variante creata: [bold]{artifacts.variant_name}[/bold]")
         console.print(f"Percorso: {artifacts.variant_dir}")
         console.print(
-            "Nota v1: la persistenza è `adapter_plus_manifest` (adapter reale + manifest deterministico), non `full_checkpoint`."
+            "Nota v1: la persistenza è `adapter_plus_manifest` "
+            "(artefatto mapping YaRN + manifest deterministico), non `full_checkpoint`."
         )
 
         state.mark_step_completed(6)
@@ -683,6 +684,7 @@ def _build_final_report(state: StretchSessionState, store: StretchSessionStore) 
         "- Un contesto più lungo non significa automaticamente qualità migliore.",
         "- Target aggressivi aumentano latenza e costo computazionale.",
         "- La v1 salva una variante persistente come `adapter_plus_manifest` (non `full_checkpoint`).",
+        "- In `adapter_plus_manifest`, `stretch_adapter.bin` è un artefatto di mapping YaRN per ricostruzione/validazione locale.",
         "- La validazione è locale/proxy e non sostituisce benchmark semantici applicativi completi.",
         "",
         "## Output prodotti",

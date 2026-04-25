@@ -49,8 +49,8 @@ class ArchitectureInfo:
 _TRANSFORMER_PRESETS: dict[str, dict[str, Any]] = {
     "forge-nano": {
         "description": (
-            "~50M params. Ultra-lightweight. Runs on any hardware including "
-            "Raspberry Pi. Good for testing pipelines and tokenizer training."
+            "~50M params. Ultra-lightweight. Suitable for smoke tests and "
+            "pipeline/tokenizer validation on low-memory hardware."
         ),
         "params_approx": "50M",
         "languages": ["en", "zh"],
@@ -66,8 +66,8 @@ _TRANSFORMER_PRESETS: dict[str, dict[str, Any]] = {
     },
     "forge-tiny": {
         "description": (
-            "~120M params. Runs on any machine, no GPU required. "
-            "Good first model — basic conversational ability in English and Chinese."
+            "~120M params. Practical baseline for local experiments on consumer hardware. "
+            "CPU-only runs are possible but typically slow."
         ),
         "params_approx": "120M",
         "languages": ["en", "zh"],

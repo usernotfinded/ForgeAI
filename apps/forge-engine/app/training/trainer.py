@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import math
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -130,7 +131,14 @@ def train(
     """
     device = config.backend
     if device == "mlx":
-        device = "cpu"  # MLX native not yet implemented, fall back
+        # TODO(native-mlx-training): replace this fallback when MLX training backend is implemented.
+        warnings.warn(
+            "Backend 'mlx' requested, but native MLX training is not implemented yet. "
+            "Falling back to CPU for this run.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        device = "cpu"
 
     model = model.to(device)
     dtype = _get_torch_dtype(config.dtype)
@@ -193,11 +201,25 @@ def train(
 
     # ── Training Loop ────────────────────────────────────────────────────────
 
+    if len(train_loader) == 0:
+        raise ValueError(
+            "Training DataLoader is empty. Check dataset size, context_length, batch_size, and split."
+        )
+    if val_loader is not None and len(val_loader) == 0:
+        raise ValueError(
+            "Validation DataLoader is empty. Reduce batch_size/val_split or use more data."
+        )
+    if config.max_steps <= start_step:
+        raise ValueError(
+            f"max_steps ({config.max_steps}) must be greater than resume step ({start_step})."
+        )
+
     model.train()
     step = start_step
     epoch = start_epoch
     running_loss = 0.0
     best_val_loss = float("inf")
+    accum_loss = 0.0
 
     train_iter = iter(train_loader)
 

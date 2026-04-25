@@ -2,17 +2,16 @@
 ForgeAI — Offline Benchmarks
 ==============================
 
-Lightweight benchmarks for evaluating model quality during/after training.
+Lightweight local evaluation helpers for regression tracking.
 
-Supported benchmarks:
-  - TinyStories eval: coherence scoring on held-out samples
-  - HellaSwag-mini: 1000-sample 0-shot accuracy (sentence completion)
-  - ARC-easy: common-sense reasoning (optional)
+Current helpers:
+  - TinyStories proxy check: qualitative generation/repetition heuristics on fixed prompts
+  - HellaSwag-mini local-file eval: optional 0-shot accuracy if user supplies JSONL data
 
-These are not frontier-level evals. They are useful for:
+These are not frontier-level or product-grade evals. They are useful for:
   - Comparing your runs against each other
   - Catching regressions during training
-  - Confirming that training actually converged
+  - Sanity-checking that generation quality did not collapse
 """
 
 from __future__ import annotations
@@ -42,11 +41,11 @@ def eval_tinystories(
     dtype: torch.dtype = torch.float32,
 ) -> dict[str, Any]:
     """
-    Generate short stories and score coherence.
+    TinyStories-style proxy check (not an official benchmark).
 
-    Uses a set of TinyStories-style prompts. For each prompt:
+    Uses fixed prompts. For each prompt:
       1. Generate a continuation
-      2. Score based on:
+      2. Score proxy quality signals:
          - Non-repetition (ratio of unique tokens)
          - Length (did it produce meaningful output?)
          - Doesn't degenerate to a single repeated token
@@ -138,10 +137,10 @@ def eval_hellaswag_mini(
     dtype: torch.dtype = torch.float32,
 ) -> dict[str, Any]:
     """
-    HellaSwag 0-shot evaluation on a subset.
+    HellaSwag-mini local-file evaluation on a subset.
 
-    HellaSwag is a sentence completion benchmark: given a context,
-    pick the correct ending from 4 choices.
+    Requires a local JSONL file. If no file is provided/found, returns
+    an explicit informational result and does not claim benchmark coverage.
 
     Expects a JSONL file where each line has:
       {"ctx": "...", "endings": ["...", "...", "...", "..."], "label": 0}
@@ -155,7 +154,7 @@ def eval_hellaswag_mini(
             "accuracy": None,
             "num_samples": 0,
             "note": (
-                "HellaSwag data not found. Download from: "
+                "HellaSwag local data not found. Download from: "
                 "https://github.com/rowanz/hellaswag "
                 "Place hellaswag_val.jsonl at the data_path."
             ),

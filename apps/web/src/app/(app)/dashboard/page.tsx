@@ -32,7 +32,7 @@ export default function DashboardPage() {
           <h1 className="text-lg font-semibold tracking-tight text-zinc-100">
             ForgeAI
           </h1>
-          <p className="text-xs text-zinc-500">Local Training Dashboard</p>
+          <p className="text-xs text-zinc-500">Local Training Dashboard (experimental MVP)</p>
         </div>
         <nav className="flex gap-6 text-sm text-zinc-400">
           <Link href="/dashboard" className="text-zinc-100 font-medium">Runs</Link>

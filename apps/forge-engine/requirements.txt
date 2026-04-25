@@ -1,4 +1,12 @@
+# Source of truth: apps/forge-engine/pyproject.toml [project.dependencies]
+# Keep this file aligned for contributors/environments that still use requirements.txt directly.
 torch>=2.2.0
+numpy>=1.26.0
+tqdm>=4.66.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 pydantic>=2.7.0
+typer>=0.12.0
+rich>=13.0.0
+tokenizers>=0.19.0
+safetensors>=0.4.0

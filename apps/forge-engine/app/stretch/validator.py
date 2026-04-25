@@ -435,7 +435,8 @@ def _persistent_artifact_check(
             passed=True,
             title="Controllo artefatto persistente",
             details=(
-                "Persistenza adapter_plus_manifest validata (adapter reale + metadati di ricostruzione deterministica)."
+                "Persistenza adapter_plus_manifest validata "
+                "(artefatto mapping YaRN + metadati di ricostruzione deterministica)."
             ),
             metrics={
                 "declared_type": declared_type,

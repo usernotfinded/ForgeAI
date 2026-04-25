@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "forge-engine"
 version = "0.1.0"
-description = "ForgeAI training engine — LLM training orchestration for any hardware scale"
+description = "ForgeAI engine — local-first CLI workbench for small and mid-sized LLM training experiments"
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.2.0",

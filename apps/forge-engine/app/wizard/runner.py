@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from rich.table import Table
 from app.core.backend import BackendInfo, get_backend
 from app.data import prepare_dataset
 from app.tokenizer import load_tokenizer, save_tokenizer, train_bpe_tokenizer
+from app.architectures.registry import ARCHITECTURE_REGISTRY
 from app.training.planner import estimate_training
 
 from .analysis import DatasetAnalysis, analyze_dataset
@@ -271,6 +273,12 @@ def _step_4_route_selection(console: Console, state: WizardSessionState, store: 
             f"{unsupported} non sono ancora disponibili in v1. "
             "Alternativa supportata: adattamento completo del modello base (continued pretraining)."
         )
+    if recommendation.recommended_path == WizardPath.ADAPT_EXISTING:
+        console.print(
+            "[yellow]Compatibilità adattamento v1:[/yellow] il wizard esegue solo resume da checkpoint "
+            "ForgeAI nativi compatibili con preset `forge-small`. "
+            "Checkpoint esterni (HF/GGUF/MLX) non sono supportati direttamente."
+        )
 
     for warning in recommendation.warnings:
         console.print(f"[yellow]Warning:[/yellow] {warning}")
@@ -431,7 +439,19 @@ def _step_7_execution(
     console.rule("[bold]Passo 7/7 — Esecuzione Guidata[/bold]")
     console.print("Perché: generiamo artefatti tracciabili ed eseguiamo i passi locali in sicurezza.")
 
-    config = _build_generated_config(state, store)
+    try:
+        config = _build_generated_config(console, state, store)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        state.execution = {
+            "status": "blocked",
+            "reason": "invalid_generated_config",
+            "details": str(exc),
+            "next_action": "fix_inputs_and_resume_step_7",
+        }
+        store.save(state)
+        return
+
     store.ensure_dirs()
     _write_json(store.generated_config_path, config)
     _write_execution_plan(store.execution_plan_path, config["commands"])
@@ -470,12 +490,12 @@ def _step_7_execution(
     _run_local_execution(console, state, store)
 
     if typer.confirm("Vuoi avviare anche il comando di training ora?", default=False):
-        training_command = _find_training_command(config["commands"])
-        if training_command:
-            console.print(f"Avvio: [dim]{training_command}[/dim]")
+        training_argv = _find_training_command(config["commands"])
+        if training_argv:
+            console.print(f"Avvio: [dim]{shlex.join(training_argv)}[/dim]")
             state.execution = {"status": "running", "stage": "training_command"}
             store.save(state)
-            completed = subprocess.run(training_command, shell=True, check=False)
+            completed = subprocess.run(training_argv, check=False)
             if completed.returncode == 0:
                 state.execution = {"status": "completed", "stage": "training_command"}
             else:
@@ -554,7 +574,11 @@ def _run_local_execution(console: Console, state: WizardSessionState, store: Ses
         console.print(f"[red]Errore durante esecuzione guidata:[/red] {exc}")
 
 
-def _build_generated_config(state: WizardSessionState, store: SessionStore) -> dict[str, Any]:
+def _build_generated_config(
+    console: Console,
+    state: WizardSessionState,
+    store: SessionStore,
+) -> dict[str, Any]:
     selected_path = _path_from_state(state)
     strategy = dict(state.answers.get("strategy", {}))
 
@@ -570,10 +594,20 @@ def _build_generated_config(state: WizardSessionState, store: SessionStore) -> d
 
     base_model_path = ""
     if selected_path == WizardPath.ADAPT_EXISTING:
-        base_model_path = typer.prompt(
-            "Percorso checkpoint modello base (ForgeAI format)",
-            default=default_base_path,
-        ).strip()
+        while True:
+            candidate = typer.prompt(
+                "Percorso checkpoint modello base (ForgeAI format)",
+                default=default_base_path,
+            ).strip()
+            try:
+                base_model_path = str(_validate_adaptation_checkpoint(candidate))
+                break
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+                if not typer.confirm("Vuoi inserire un altro checkpoint base?", default=True):
+                    raise ValueError(
+                        "Adattamento annullato: checkpoint base non compatibile con la pipeline v1."
+                    ) from exc
 
     tokenizer_override = typer.prompt(
         "Se hai già un tokenizer, inserisci il path (altrimenti lascia vuoto)",
@@ -591,7 +625,6 @@ def _build_generated_config(state: WizardSessionState, store: SessionStore) -> d
         tokenizer_dir=str(tokenizer_dir),
         prepared_data_dir=str(prepared_data_dir),
         checkpoints_dir=str(checkpoints_dir),
-        base_model_name=selected_base_model,
         base_model_path=base_model_path,
         strategy=strategy,
     )
@@ -642,82 +675,187 @@ def _build_command_plan(
     tokenizer_dir: str,
     prepared_data_dir: str,
     checkpoints_dir: str,
-    base_model_name: str | None,
     base_model_path: str,
     strategy: dict[str, Any],
-) -> list[dict[str, str]]:
-    commands: list[dict[str, str]] = []
+) -> list[dict[str, Any]]:
+    commands: list[dict[str, Any]] = []
 
     if not (Path(tokenizer_dir) / "tokenizer.json").exists():
-        commands.append(
-            {
-                "name": "train_tokenizer",
-                "reason": "Costruisce il tokenizer locale se non esiste già.",
-                "command": f"forge tokenizer train --data {source_data} --vocab-size 8000 --output {tokenizer_dir}",
-            }
-        )
+        commands.append(_build_command_item(
+            name="train_tokenizer",
+            reason="Costruisce il tokenizer locale se non esiste già.",
+            argv=[
+                "forge",
+                "tokenizer",
+                "train",
+                "--data",
+                source_data,
+                "--vocab-size",
+                "8000",
+                "--output",
+                tokenizer_dir,
+            ],
+        ))
 
-    commands.append(
-        {
-            "name": "prepare_data",
-            "reason": "Converte i dati in shard binari per training veloce.",
-            "command": (
-                f"forge data prepare {source_data} --output {prepared_data_dir} "
-                f"--tokenizer {tokenizer_dir} --context-length 2048"
-            ),
-        }
-    )
+    commands.append(_build_command_item(
+        name="prepare_data",
+        reason="Converte i dati in shard binari per training veloce.",
+        argv=[
+            "forge",
+            "data",
+            "prepare",
+            source_data,
+            "--output",
+            prepared_data_dir,
+            "--tokenizer",
+            tokenizer_dir,
+            "--context-length",
+            "2048",
+        ],
+    ))
 
     if selected_path == WizardPath.ADAPT_EXISTING:
-        if base_model_name:
-            commands.append(
-                {
-                    "name": "optional_pull_base_model",
-                    "reason": "Scarica e converte il modello base se non lo hai già locale.",
-                    "command": f"forge model pull {base_model_name} --output ./models",
-                }
-            )
-
-        commands.append(
-            {
-                "name": "train_adapt_existing",
-                "reason": "Adattamento del modello base (v1 supporta continued pretraining).",
-                "command": (
-                    "forge train --arch transformer "
-                    f"--preset forge-small --data {prepared_data_dir} --tokenizer {tokenizer_dir} "
-                    f"--output {checkpoints_dir} --resume {base_model_path} "
-                    f"--lr {strategy.get('learning_rate', 1.8e-4)} "
-                    f"--batch-size {strategy.get('batch_size', 2)} "
-                    f"--grad-accum {strategy.get('grad_accum', 2)} "
-                    f"--max-steps {strategy.get('max_steps', 3500)} "
-                    f"--val-split {strategy.get('val_split', 0.06)} "
-                    f"--save-every {strategy.get('save_every', 500)} "
-                    f"--val-every {strategy.get('val_every', 200)}"
-                ),
-            }
-        )
+        commands.append(_build_command_item(
+            name="train_adapt_existing",
+            reason=(
+                "Adatta un checkpoint ForgeAI compatibile con preset forge-small "
+                "(v1: niente LoRA/QLoRA e niente resume diretto da checkpoint esterni)."
+            ),
+            argv=[
+                "forge",
+                "train",
+                "--arch",
+                "transformer",
+                "--preset",
+                "forge-small",
+                "--data",
+                prepared_data_dir,
+                "--tokenizer",
+                tokenizer_dir,
+                "--output",
+                checkpoints_dir,
+                "--resume",
+                base_model_path,
+                "--lr",
+                str(strategy.get("learning_rate", 1.8e-4)),
+                "--batch-size",
+                str(strategy.get("batch_size", 2)),
+                "--grad-accum",
+                str(strategy.get("grad_accum", 2)),
+                "--max-steps",
+                str(strategy.get("max_steps", 3500)),
+                "--val-split",
+                str(strategy.get("val_split", 0.06)),
+                "--save-every",
+                str(strategy.get("save_every", 500)),
+                "--val-every",
+                str(strategy.get("val_every", 200)),
+            ],
+        ))
     else:
-        commands.append(
-            {
-                "name": "train_from_scratch",
-                "reason": "Training completo da zero con preset coerente con la strategia scelta.",
-                "command": (
-                    "forge train --arch transformer "
-                    f"--preset {strategy.get('model_preset', 'forge-tiny')} "
-                    f"--data {prepared_data_dir} --tokenizer {tokenizer_dir} "
-                    f"--output {checkpoints_dir} "
-                    f"--lr {strategy.get('learning_rate', 2.8e-4)} "
-                    f"--batch-size {strategy.get('batch_size', 2)} "
-                    f"--grad-accum {strategy.get('grad_accum', 2)} "
-                    f"--max-steps {strategy.get('max_steps', 12000)} "
-                    f"--val-split {strategy.get('val_split', 0.06)} "
-                    f"--save-every {strategy.get('save_every', 800)} "
-                    f"--val-every {strategy.get('val_every', 250)}"
-                ),
-            }
-        )
+        commands.append(_build_command_item(
+            name="train_from_scratch",
+            reason="Training completo da zero con preset coerente con la strategia scelta.",
+            argv=[
+                "forge",
+                "train",
+                "--arch",
+                "transformer",
+                "--preset",
+                str(strategy.get("model_preset", "forge-tiny")),
+                "--data",
+                prepared_data_dir,
+                "--tokenizer",
+                tokenizer_dir,
+                "--output",
+                checkpoints_dir,
+                "--lr",
+                str(strategy.get("learning_rate", 2.8e-4)),
+                "--batch-size",
+                str(strategy.get("batch_size", 2)),
+                "--grad-accum",
+                str(strategy.get("grad_accum", 2)),
+                "--max-steps",
+                str(strategy.get("max_steps", 12000)),
+                "--val-split",
+                str(strategy.get("val_split", 0.06)),
+                "--save-every",
+                str(strategy.get("save_every", 800)),
+                "--val-every",
+                str(strategy.get("val_every", 250)),
+            ],
+        ))
 
     return commands
+
+
+def _build_command_item(name: str, reason: str, argv: list[str]) -> dict[str, Any]:
+    cleaned_argv = [str(part) for part in argv if str(part).strip()]
+    return {
+        "name": name,
+        "reason": reason,
+        "command": shlex.join(cleaned_argv),
+        "argv": cleaned_argv,
+    }
+
+
+def _validate_adaptation_checkpoint(path_value: str) -> Path:
+    if not path_value.strip():
+        raise ValueError("Percorso checkpoint base obbligatorio per il percorso di adattamento.")
+
+    candidate = Path(path_value).expanduser()
+    if not candidate.exists():
+        raise ValueError(f"Checkpoint base non trovato: {candidate}")
+
+    resolved = (candidate / "latest").resolve() if (candidate / "latest").exists() else candidate.resolve()
+    if not resolved.is_dir():
+        raise ValueError(f"Il percorso checkpoint base deve essere una directory: {resolved}")
+
+    model_path = resolved / "model.pt"
+    metadata_path = resolved / "metadata.json"
+    if not model_path.exists() or not metadata_path.exists():
+        raise ValueError(
+            "Checkpoint non compatibile: servono model.pt e metadata.json "
+            "(formato checkpoint ForgeAI)."
+        )
+
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"metadata.json non valido in {resolved}: {exc}") from exc
+
+    if str(metadata.get("architecture", "")).strip().lower() != "transformer":
+        raise ValueError(
+            "Checkpoint non supportato: l'adattamento v1 richiede architecture='transformer'."
+        )
+
+    source = str(metadata.get("source", "forgeai")).strip().lower()
+    if source in {"huggingface", "gguf", "mlx", "llama.cpp", "llama_cpp", "converted"}:
+        raise ValueError(
+            "Checkpoint non supportato in adattamento v1: il resume diretto da fonti esterne "
+            "(HF/GGUF/MLX) non è ancora supportato. Usa un checkpoint ForgeAI nativo."
+        )
+
+    model_config = metadata.get("model_config")
+    if not isinstance(model_config, dict):
+        raise ValueError("Checkpoint non valido: blocco model_config mancante in metadata.json.")
+
+    preset_config = dict(ARCHITECTURE_REGISTRY["transformer"].presets["forge-small"]["config"])
+    required_keys = ("n_layer", "n_head", "n_kv_head", "n_embd", "context_length", "vocab_size")
+    mismatches: list[str] = []
+    for key in required_keys:
+        if int(model_config.get(key, -1) or -1) != int(preset_config[key]):
+            mismatches.append(key)
+
+    if mismatches:
+        mismatch_list = ", ".join(mismatches)
+        raise ValueError(
+            "Checkpoint non compatibile con l'adattamento v1: il run corrente può riprendere "
+            "solo checkpoint ForgeAI compatibili con preset forge-small. "
+            f"Campi incompatibili: {mismatch_list}."
+        )
+
+    return resolved
 
 
 def _build_final_summary(state: WizardSessionState, config: dict[str, Any], store: SessionStore) -> str:
@@ -744,7 +882,9 @@ def _build_final_summary(state: WizardSessionState, config: dict[str, Any], stor
         f"- Riepilogo: `{store.summary_path}`",
         "",
         "## Nota modalità",
-        "- In v1 LoRA/QLoRA non sono disponibili; percorso adattamento usa continued pretraining.",
+        "- In v1 LoRA/QLoRA non sono disponibili.",
+        "- Il percorso di adattamento accetta solo checkpoint ForgeAI nativi compatibili con `forge-small`.",
+        "- Resume diretto da checkpoint esterni (HF/GGUF/MLX) non è supportato nel wizard v1.",
         "",
         "## Comandi principali",
     ]
@@ -761,7 +901,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, file_obj, indent=2, ensure_ascii=True)
 
 
-def _write_execution_plan(path: Path, commands: list[dict[str, str]]) -> None:
+def _write_execution_plan(path: Path, commands: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", ""]
     for item in commands:
@@ -771,11 +911,16 @@ def _write_execution_plan(path: Path, commands: list[dict[str, str]]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _find_training_command(commands: list[dict[str, str]]) -> str | None:
+def _find_training_command(commands: list[dict[str, Any]]) -> list[str] | None:
     for item in commands:
         name = item.get("name", "")
         if name.startswith("train_"):
-            return item.get("command")
+            raw_argv = item.get("argv")
+            if isinstance(raw_argv, list) and raw_argv:
+                return [str(part) for part in raw_argv]
+            raw_command = item.get("command")
+            if isinstance(raw_command, str) and raw_command.strip():
+                return shlex.split(raw_command)
     return None
 
 

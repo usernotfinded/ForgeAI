@@ -2,25 +2,25 @@
 ForgeAI — Hardware Backend Auto-Detection
 ==========================================
 
-Detects the best available compute backend and returns a unified interface
-for placing models and tensors on the right device.
+Detects the best currently usable backend for ForgeAI runtime flows.
 
 Priority order:
-  1. CUDA  — NVIDIA GPU (best training performance)
+  1. CUDA  — NVIDIA GPU via PyTorch
   2. MPS   — Apple Silicon via PyTorch MPS backend
-  3. MLX   — Apple Silicon via Apple's MLX framework (optional, if installed)
-  4. CPU   — Fallback (inference only; training is very slow)
+  3. MLX   — Marker that MLX is available (native MLX training backend not yet implemented)
+  4. CPU   — Fallback (usable for tests/debugging, very slow for training)
 
 Usage:
     from app.core.backend import detect_backend, get_device
 
     backend = detect_backend()
     print(backend)               # BackendInfo(name='cuda', device='cuda:0', ...)
-    model = model.to(backend.torch_device)
+    model = model.to(backend.torch_device)  # PyTorch paths
 """
 
 from __future__ import annotations
 
+import os
 import platform
 import subprocess
 from dataclasses import dataclass, field
@@ -36,7 +36,7 @@ import torch
 class BackendType(str, Enum):
     CUDA = "cuda"       # NVIDIA GPU
     MPS  = "mps"        # Apple Silicon via PyTorch MPS
-    MLX  = "mlx"        # Apple Silicon via MLX (preferred on Apple for training)
+    MLX  = "mlx"        # MLX runtime detected (native MLX training backend pending)
     CPU  = "cpu"        # CPU-only fallback
 
 
@@ -82,6 +82,10 @@ class BackendInfo:
     @property
     def recommended_preset(self) -> str:
         """Recommended starter model preset for this hardware."""
+        if self.type == BackendType.MLX and self.torch_device == "cpu":
+            # MLX runtime is present, but PyTorch training falls back to CPU for now.
+            return "forge-nano"
+
         if self.vram_gb is None:
             # CPU only — keep it very small
             return "forge-nano"
@@ -125,6 +129,8 @@ class BackendInfo:
 
 def _check_mlx() -> bool:
     """Return True if the mlx package is importable."""
+    if os.environ.get("FORGE_DISABLE_MLX_CHECK", "0") == "1":
+        return False
     try:
         import mlx.core  # noqa: F401
         return True
@@ -164,8 +170,8 @@ def detect_backend() -> BackendInfo:
     """
     Auto-detect the best available compute backend.
 
-    Checks in order: CUDA → MLX (Apple) → MPS (Apple) → CPU
-    Returns a BackendInfo with all relevant information for training configuration.
+    Checks in order: CUDA → MPS (Apple) → MLX marker (Apple) → CPU.
+    Returns a BackendInfo used by the current PyTorch training pipeline.
     """
     mlx_available = _check_mlx()
     notes: list[str] = []
@@ -203,38 +209,21 @@ def detect_backend() -> BackendInfo:
             notes=notes,
         )
 
-    # ── 2. Apple Silicon — MLX (preferred) ───────────────────────────────────
-    if _is_apple_silicon() and mlx_available:
-        ram_gb = _get_apple_silicon_memory_gb()
-        notes.append(
-            "MLX detected — using Apple's native ML framework for best Apple Silicon performance."
-        )
-        notes.append(
-            "MLX uses unified memory: models and activations share the same RAM pool as the OS."
-        )
-
-        return BackendInfo(
-            type=BackendType.MLX,
-            torch_device="cpu",   # MLX has its own array system; PyTorch falls back to CPU
-            device_name=f"Apple Silicon (MLX) — {platform.processor() or 'M-series'}",
-            vram_gb=round(ram_gb, 1),
-            unified_memory=True,
-            bf16_supported=True,   # MLX supports bfloat16 natively
-            flash_attention=False, # flash_attn is CUDA-only; MLX has its own attention kernels
-            mlx_available=True,
-            notes=notes,
-        )
-
-    # ── 3. Apple Silicon — PyTorch MPS ───────────────────────────────────────
+    # ── 2. Apple Silicon — PyTorch MPS ───────────────────────────────────────
     if _is_apple_silicon() and torch.backends.mps.is_available():
         ram_gb = _get_apple_silicon_memory_gb()
         notes.append(
-            "Using PyTorch MPS backend (Apple Silicon). "
-            "For better performance, install MLX: pip install mlx"
+            "Training uses PyTorch MPS on Apple Silicon."
         )
-        notes.append(
-            "MPS uses unified memory — models and activations count against total RAM."
-        )
+        if mlx_available:
+            notes.append(
+                "MLX package detected: available for mlx-lm inference workflows. "
+                "Native MLX training backend is still planned."
+            )
+        else:
+            notes.append(
+                "MLX package not detected. Install mlx/mlx-lm to enable MLX inference workflows."
+            )
 
         return BackendInfo(
             type=BackendType.MPS,
@@ -244,15 +233,36 @@ def detect_backend() -> BackendInfo:
             unified_memory=True,
             bf16_supported=False,  # MPS has limited bf16 support
             flash_attention=False,
-            mlx_available=False,
+            mlx_available=mlx_available,
+            notes=notes,
+        )
+
+    # ── 3. Apple Silicon — MLX marker (no MPS available) ─────────────────────
+    if _is_apple_silicon() and mlx_available:
+        ram_gb = _get_apple_silicon_memory_gb()
+        notes.append(
+            "MLX package detected, but PyTorch MPS backend is unavailable."
+        )
+        notes.append(
+            "Native MLX training backend is not implemented yet: ForgeAI training falls back to CPU in this environment."
+        )
+
+        return BackendInfo(
+            type=BackendType.MLX,
+            torch_device="cpu",  # TODO(native-mlx-training): replace with real MLX training device path.
+            device_name=f"Apple Silicon (MLX runtime) — {platform.processor() or 'M-series'}",
+            vram_gb=round(ram_gb, 1),
+            unified_memory=True,
+            bf16_supported=False,
+            flash_attention=False,
+            mlx_available=True,
             notes=notes,
         )
 
     # ── 4. CPU fallback ───────────────────────────────────────────────────────
     cpu_count = torch.get_num_threads()
     notes.append(
-        "No GPU detected. Training will be very slow on CPU. "
-        "Inference of forge-nano/tiny is feasible."
+        "No CUDA/MPS backend detected. CPU mode is intended for tests/debugging and very small runs."
     )
     notes.append(
         f"Using {cpu_count} CPU threads. Set OMP_NUM_THREADS to override."
@@ -266,7 +276,7 @@ def detect_backend() -> BackendInfo:
         unified_memory=False,
         bf16_supported=False,
         flash_attention=False,
-        mlx_available=False,
+        mlx_available=mlx_available,
         notes=notes,
     )
 

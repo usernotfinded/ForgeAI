@@ -26,7 +26,7 @@ interface EvalResult {
 export default function EvalPage() {
   const [checkpointDir, setCheckpointDir] = useState("./checkpoints/run");
   const [tokenizerDir, setTokenizerDir] = useState("./tokenizers/my-tokenizer");
-  const [dataPath, setDataPath] = useState("./data/val.bin");
+  const [dataPath, setDataPath] = useState("./data/processed");
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<EvalResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,13 +107,13 @@ export default function EvalPage() {
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-500 block mb-1">Validation data (.bin shard)</label>
+              <label className="text-xs text-zinc-500 block mb-1">Prepared dataset directory</label>
               <input
                 type="text"
                 value={dataPath}
                 onChange={(e) => setDataPath(e.target.value)}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200 font-mono focus:outline-none focus:border-zinc-500"
-                placeholder="./data/val.bin"
+                placeholder="./data/processed"
               />
             </div>
 
@@ -167,7 +167,7 @@ export default function EvalPage() {
 
             {result.tinystories && (
               <div className="mt-4 pt-4 border-t border-zinc-800">
-                <p className="text-xs text-zinc-500 mb-3">TinyStories Benchmark</p>
+                <p className="text-xs text-zinc-500 mb-3">TinyStories proxy check (qualitative)</p>
                 <div className="grid grid-cols-3 gap-3 text-sm">
                   <div>
                     <p className="text-xs text-zinc-600">Uniqueness</p>

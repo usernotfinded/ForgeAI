@@ -16,8 +16,8 @@ export function QuickActions() {
   const actions = [
     {
       label: "New run",
-      description: "Train a model from scratch or fine-tune",
-      href: "/dashboard/runs/new",
+      description: "Open hardware page with CLI quick-start commands",
+      href: "/dashboard/hardware",
       icon: "▶",
     },
     {
@@ -28,8 +28,8 @@ export function QuickActions() {
     },
     {
       label: "Pull model",
-      description: "Import SmolLM, Qwen, TinyLlama...",
-      href: "/dashboard/models",
+      description: "Use CLI pull + converted checkpoint in local chat",
+      href: "/dashboard/chat",
       icon: "⬇",
     },
     {

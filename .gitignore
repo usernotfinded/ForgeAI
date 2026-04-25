@@ -80,6 +80,7 @@ docker-volumes/
 *.log
 logs/
 *.log.*
+artifacts/smoke/
 
 # ── Coverage & Testing ───────────────────────────────────────────────────────
 .coverage

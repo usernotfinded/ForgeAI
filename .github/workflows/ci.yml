@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  forge-engine:
+    name: Forge Engine (CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install lightweight dev environment
+        run: |
+          python -m pip install --upgrade pip
+          # Keep CI fast and CPU-only: install the package editable, then only lightweight deps.
+          python -m pip install -e ./apps/forge-engine --no-deps
+          python -m pip install pytest ruff typer rich numpy tqdm pydantic fastapi uvicorn tokenizers safetensors
+
+      - name: Import smoke checks
+        run: |
+          python - <<'PY'
+          import importlib
+
+          modules = [
+              "cli.main",
+              "app.training.planner",
+              "app.wizard.analysis",
+              "app.stretch.runner",
+          ]
+          for module in modules:
+              importlib.import_module(module)
+          print("Import checks passed.")
+          PY
+
+      - name: CLI help smoke checks
+        run: |
+          forge --help > /dev/null
+          forge train --help > /dev/null
+          forge stretch --help > /dev/null
+
+      - name: Duplicate-file guard
+        run: ./scripts/check_no_duplicate_suffix.sh
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Pytest
+        run: pytest apps/forge-engine/tests -q
+
+      - name: Web checks (skipped by design)
+        run: |
+          echo "Skipping apps/web checks in this lightweight gate."
+          echo "Reason: no lockfile is committed and this CI is intentionally CPU-only/fast for core Python workflows."

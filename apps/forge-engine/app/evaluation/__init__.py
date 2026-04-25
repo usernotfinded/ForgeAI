@@ -1,7 +1,7 @@
 """
 ForgeAI Evaluation
 ==================
-Perplexity tracking, offline benchmarks, and model comparison.
+Perplexity tracking, lightweight local eval helpers, and model comparison.
 """
 
 from __future__ import annotations

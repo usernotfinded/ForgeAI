@@ -16,6 +16,7 @@ from .planner import StretchPlan
 FINAL_ARTIFACT_TYPE_FULL_CHECKPOINT = "full_checkpoint"
 FINAL_ARTIFACT_TYPE_ADAPTER_PLUS_MANIFEST = "adapter_plus_manifest"
 ADAPTER_FORMAT = "forgeai.stretch.yarn.adapter.v1"
+ADAPTER_SEMANTICS = "yarn_position_map_for_deterministic_reconstruction"
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,7 @@ class StretchAdapterArtifact:
     size_bytes: int
     entry_count: int
     format: str
+    semantics: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +35,7 @@ class StretchAdapterArtifact:
             "size_bytes": self.size_bytes,
             "entry_count": self.entry_count,
             "format": self.format,
+            "semantics": self.semantics,
         }
 
 
@@ -133,6 +136,10 @@ def create_persistent_variant(
         "yarn": plan.yarn_config,
         "final_artifact_type": final_artifact_type,
         "adapter_artifact": adapter_artifact.to_dict(),
+        "adapter_semantics_note": (
+            "stretch_adapter.bin is a deterministic YaRN position-map artifact. "
+            "It is used by reconstruction/validation utilities and is not a standalone PEFT adapter."
+        ),
         "variant_model_is_copy": variant_model_is_copy,
         "generated_at": _utc_now_iso(),
     }
@@ -162,8 +169,8 @@ def create_persistent_variant(
             "steps": [
                 "Load source model checkpoint and source metadata.",
                 "Load stretch_adapter.bin and verify sha256.",
-                "Apply YaRN rope scaling from stretch_metadata.json.",
-                "Compose long-context variant using adapter artifact + metadata.",
+                "Apply YaRN rope scaling from stretch_metadata.json to model config.",
+                "Use position-map artifact for deterministic reconstruction/proxy checks.",
             ],
         },
         "persistence_proof": {
@@ -171,6 +178,7 @@ def create_persistent_variant(
             "variant_model_differs_from_source": not variant_model_is_copy,
             "adapter_artifact_present": True,
             "adapter_sha256": adapter_artifact.sha256,
+            "adapter_artifact_semantics": ADAPTER_SEMANTICS,
         },
         "method": plan.method,
         "profile": plan.profile.value,
@@ -287,6 +295,7 @@ def _create_yarn_adapter_artifact(
         size_bytes=output_path.stat().st_size,
         entry_count=len(positions),
         format=ADAPTER_FORMAT,
+        semantics=ADAPTER_SEMANTICS,
     )
 
 
