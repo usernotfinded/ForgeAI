@@ -258,6 +258,9 @@ ForgeAI is Apple Silicon focused and MLX-oriented, but the current training impl
 
 Auto-detection runs at startup and selects backend plus dtype recommendation. The recommendation is heuristic and should be treated as a starting point.
 
+Experimental MLX foundation check: `forge experimental mlx-smoke`. This is a
+tiny optional smoke test only; it is not MLX-native ForgeAI training.
+
 ### Hardware Examples
 
 | Hardware | Backend | Practical range (today) | Notes |

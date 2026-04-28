@@ -9,6 +9,7 @@ Usage:
     forge eval  ./checkpoints/run-1/latest --benchmark tinystories hellaswag-mini --tokenizer ./tokenizers/tok
     forge chat  ./checkpoints/run-1/latest
     forge experimental keras-smoke
+    forge experimental mlx-smoke
     forge model pull smollm-135m
 """
 
@@ -90,6 +91,59 @@ def keras_smoke(
         console.print("  Train   : skipped")
 
     console.print("[green]Experimental Keras smoke completed.[/green]")
+
+
+@experimental_app.command("mlx-smoke")
+def mlx_smoke(
+    train_step: bool = typer.Option(
+        True,
+        "--train-step/--no-train-step",
+        help="Run one tiny in-memory MLX optimizer step after the forward pass.",
+    ),
+):
+    """
+    EXPERIMENTAL: run a tiny optional MLX backend foundation smoke test.
+
+    This does not download models, load pretrained weights, or replace ForgeAI's
+    native PyTorch training/checkpoint path.
+    """
+    from app.experimental.mlx_backend import (
+        MlxUnavailableError,
+        check_availability,
+        run_smoke,
+    )
+
+    availability = check_availability()
+    if not availability.mlx_importable:
+        console.print("[yellow]Experimental MLX backend is not available.[/yellow]")
+        console.print(availability.message, markup=False, soft_wrap=True)
+        raise typer.Exit(1)
+
+    console.print("\n[bold]ForgeAI - Experimental MLX smoke[/bold]")
+    console.print("[dim]This path is experimental and does not affect ForgeAI PyTorch training.[/dim]")
+    console.print(f"  Platform      : {availability.platform} / {availability.machine}")
+    console.print(f"  Apple Silicon : {'yes' if availability.apple_silicon else 'no'}")
+    console.print(f"  MLX version   : {availability.mlx_version or 'unknown'}")
+    console.print(f"  Default device: {availability.default_device or 'unknown'}")
+
+    try:
+        result = run_smoke(train_step=train_step)
+    except MlxUnavailableError as exc:
+        console.print(str(exc), markup=False, soft_wrap=True)
+        raise typer.Exit(1) from exc
+    except Exception as exc:
+        console.print("[red]Experimental MLX smoke failed.[/red]")
+        console.print(f"[dim]{type(exc).__name__}: {exc}[/dim]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"  Tensor  : shape {result.tensor_shape}, sum {result.tensor_sum:.6f}")
+    console.print(f"  Forward : output shape {result.forward_shape}")
+    if result.loss is not None:
+        console.print(f"  Train   : one step loss {result.loss:.6f}")
+    else:
+        console.print("  Train   : skipped")
+
+    console.print("[green]Experimental MLX smoke completed.[/green]")
 
 
 # ── forge plan ────────────────────────────────────────────────────────────────
