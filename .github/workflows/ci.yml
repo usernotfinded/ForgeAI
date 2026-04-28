@@ -67,6 +67,9 @@ jobs:
     name: Forge Engine (Core Torch + Mypy)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      PYTHONPATH: apps/forge-engine
+      MYPYPATH: apps/forge-engine
 
     steps:
       - name: Checkout
