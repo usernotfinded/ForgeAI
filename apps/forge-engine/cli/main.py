@@ -350,6 +350,39 @@ def _validate_training_data_preflight(
     )
 
 
+def _hardware_feasibility_warnings(
+    *,
+    model_params: int,
+    backend: object,
+) -> list[str]:
+    warnings: list[str] = []
+    backend_type = getattr(getattr(backend, "type", None), "value", "unknown")
+    vram_gb = getattr(backend, "vram_gb", None)
+    weights_gb = model_params * 2 / 1e9
+
+    if backend_type == "cpu":
+        warnings.append(
+            "CPU training is likely very slow."
+        )
+
+    if vram_gb is None:
+        return warnings
+
+    memory_gb = float(vram_gb)
+    if memory_gb < weights_gb:
+        warnings.append(
+            f"Detected memory ({memory_gb:.1f} GB) is below estimated model weights "
+            f"({weights_gb:.1f} GB). This is not recommended and may OOM."
+        )
+    elif memory_gb < weights_gb * 4:
+        warnings.append(
+            f"Detected memory ({memory_gb:.1f} GB) leaves a tight margin for estimated "
+            f"{weights_gb:.1f} GB model weights. Use small batches or gradient checkpointing."
+        )
+
+    return warnings
+
+
 @app.command()
 def train(
     arch: str = typer.Option("transformer", "--arch", help="Model architecture"),
@@ -368,10 +401,20 @@ def train(
     val_every: int = typer.Option(200, "--val-every", help="Run validation every N steps"),
     context_length: int = typer.Option(None, "--context-length", help="Override context length"),
     gradient_checkpointing: bool = typer.Option(False, "--gradient-checkpointing", help="Enable gradient checkpointing"),
+    strict_hardware_checks: bool = typer.Option(
+        False,
+        "--strict-hardware-checks",
+        help=(
+            "Hardware feasibility checks are advisory by default. "
+            "Use --strict-hardware-checks to turn warnings into hard failures."
+        ),
+    ),
 ):
     """
     Train a language model from scratch using the current PyTorch training path (CUDA/MPS/CPU).
     Native MLX training is planned but not yet implemented.
+
+    Hardware feasibility checks are advisory by default. Use --strict-hardware-checks to turn warnings into hard failures.
     """
     import torch
     from app.core.backend import BackendType, get_backend
@@ -434,6 +477,10 @@ def train(
     total_params = model.num_parameters()
     console.print(f"  Model   : {arch} — {total_params / 1e6:.1f}M parameters")
     console.print(f"  Context : {ctx_len}")
+    hardware_warnings = _hardware_feasibility_warnings(
+        model_params=total_params,
+        backend=backend,
+    )
 
     # Create data loaders
     try:
@@ -467,6 +514,15 @@ def train(
     )
 
     console.print(f"  Data    : {total_samples} sequences ({train_samples} train, {val_samples} val)")
+    if hardware_warnings:
+        console.print()
+        for warning in hardware_warnings:
+            console.print(f"[yellow]Hardware warning:[/yellow] {warning}")
+        from app.training.planner import HARDWARE_ADVISORY_POLICY
+        console.print(f"[yellow]Warning:[/yellow] {HARDWARE_ADVISORY_POLICY}", soft_wrap=True)
+        if strict_hardware_checks:
+            console.print("[red]Strict hardware checks enabled; stopping before training.[/red]")
+            raise typer.Exit(1)
     console.print()
 
     # Training config

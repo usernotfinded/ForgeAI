@@ -78,27 +78,27 @@ def select_compatible_models(
     limit: int = 5,
 ) -> list[BaseModelCandidate]:
     """
-    Return compatible base models using only the local catalog.
+    Return base model candidates using only the local catalog.
 
-    Compatibility is estimated from available memory and the minimum memory
-    requirement for lightweight adaptation.
+    Memory compatibility is advisory. Low-memory candidates are still returned
+    so the wizard can warn without blocking solely on estimated hardware.
     """
     memory_gb = float(available_memory_gb or 0.0)
     ranked_candidates: list[tuple[int, float, BaseModelCandidate]] = []
 
     for model in LOCAL_BASE_MODEL_CATALOG:
-        if memory_gb < model.min_memory_gb:
-            continue
-
         if memory_gb >= model.preferred_memory_gb:
             recommendation_level = "alta"
             recommendation_score = 2
         elif memory_gb >= model.min_memory_gb + 2.0:
             recommendation_level = "media"
             recommendation_score = 1
-        else:
+        elif memory_gb >= model.min_memory_gb:
             recommendation_level = "bassa"
             recommendation_score = 0
+        else:
+            recommendation_level = "non consigliata"
+            recommendation_score = -1
 
         candidate = BaseModelCandidate(
             name=model.name,

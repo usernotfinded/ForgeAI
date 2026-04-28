@@ -129,7 +129,12 @@ def analyze_compatibility(
         )
         if not valid_targets:
             errors.append(
-                "Nessun target context realistico disponibile su questo hardware per stretch v1."
+                "Nessun target context supportato dalla ricetta stretch v1 per questo modello."
+            )
+        elif max_realistic_target is not None and valid_targets[-1] > max_realistic_target:
+            warnings.append(
+                "Alcuni target superano la stima realistica per l'hardware rilevato. "
+                "ForgeAI li lascia selezionabili: la fattibilità hardware è un avviso, non un blocco."
             )
 
     prudent_target = valid_targets[0] if valid_targets else None
@@ -170,8 +175,6 @@ def generate_valid_targets(
             continue
         if target > recipe.max_target_context:
             continue
-        if target > max_realistic_target:
-            continue
         candidates.append(target)
 
     if not candidates:
@@ -199,7 +202,7 @@ def validate_target_context(
         return TargetValidation(
             is_valid=False,
             reason=(
-                f"Il target context {target_context} non è nella lista dei target realistici supportati per questa configurazione."
+                f"Il target context {target_context} non è nella lista dei target supportati per questa configurazione."
             ),
             suggested_targets=valid_targets[:3],
         )

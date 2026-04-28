@@ -57,6 +57,11 @@ BACKEND_TFLOPS = {
     "mps": 5.0,
 }
 
+HARDWARE_ADVISORY_POLICY = (
+    "Hardware feasibility checks are advisory by default. "
+    "Use --strict-hardware-checks to turn warnings into hard failures."
+)
+
 
 @dataclass
 class TrainingPlan:
@@ -73,6 +78,9 @@ class TrainingPlan:
     checkpoint_size_gb: float
     recommended_dtype: str
     recommended_batch_size: int
+    feasibility_status: str
+    memory_risk: str
+    recommendation: str
     data_inspection: dict[str, Any]
     warnings: list[str]
 
@@ -109,6 +117,9 @@ class TrainingPlan:
                 table.add_row("Prepared token dtype", prepared_dtype)
         table.add_row("Dtype", self.recommended_dtype)
         table.add_row("Batch size (auto)", str(self.recommended_batch_size))
+        table.add_row("Feasibility", self.feasibility_status)
+        table.add_row("Memory risk", self.memory_risk)
+        table.add_row("Recommendation", self.recommendation)
         table.add_row("", "")
         table.add_row("Estimated time", f"~{self.estimated_hours:.0f}h ({days:.1f} days)")
         table.add_row("Electricity", f"~{self.electricity_kwh:.0f} kWh → ~€{cost_eur:.0f}")
@@ -122,6 +133,7 @@ class TrainingPlan:
                 console.print(f"  [yellow]⚠[/yellow]  {w}")
             console.print()
 
+        console.print(f"  [dim]{HARDWARE_ADVISORY_POLICY}[/dim]", soft_wrap=True)
         console.print("  Run [bold]forge train[/bold] with the same flags to start.")
         console.print()
 
@@ -175,16 +187,44 @@ def estimate_training(
     batch_size = max(1, int(vram / (n_params / 1e8)))
 
     warnings = []
+    weights_gb = n_params * 2 / 1e9
+    memory_risk = "good"
     if vram < (n_params * 2 / 1e9):
+        memory_risk = "not recommended"
         warnings.append(
-            f"Model requires ~{n_params * 2 / 1e9:.1f} GB for weights alone. "
-            f"Your hardware has {vram:.0f} GB. Gradient checkpointing will be required."
+            f"Model requires ~{weights_gb:.1f} GB for weights alone. "
+            f"Your hardware has {vram:.0f} GB. This is not recommended and may OOM."
         )
+    elif vram < weights_gb * 4:
+        memory_risk = "risky"
+        warnings.append(
+            f"Hardware memory margin is tight: ~{weights_gb:.1f} GB weights vs "
+            f"{vram:.0f} GB detected memory. Use small batches and consider gradient checkpointing."
+        )
+
+    time_risk = "good"
     if estimated_hours > 24 * 30:
+        time_risk = "not recommended"
         warnings.append(
             f"Estimated training time is {estimated_hours / 24:.0f} days. "
-            "Consider reducing model size or token count."
+            "This is likely impractical, but ForgeAI treats this as advisory."
         )
+    elif estimated_hours > 24 * 7:
+        time_risk = "risky"
+        warnings.append(
+            f"Estimated training time is {estimated_hours / 24:.1f} days. "
+            "This is feasible to launch but operationally risky."
+        )
+
+    risk_order = {"good": 0, "risky": 1, "not recommended": 2}
+    feasibility_status = max((memory_risk, time_risk), key=lambda item: risk_order[item])
+    if feasibility_status == "good":
+        recommendation = "reasonable starting point"
+    elif feasibility_status == "risky":
+        recommendation = "warn and continue; reduce batch/model size if iteration speed matters"
+    else:
+        recommendation = "not recommended; warn and continue unless strict mode is requested"
+
     warnings.append(
         "Planner outputs are heuristic estimates based on model size + backend throughput. "
         "Use prepared dataset metadata as guidance, not as a guarantee."
@@ -210,6 +250,9 @@ def estimate_training(
         checkpoint_size_gb=checkpoint_size_gb,
         recommended_dtype=backend.recommended_dtype,
         recommended_batch_size=batch_size,
+        feasibility_status=feasibility_status,
+        memory_risk=memory_risk,
+        recommendation=recommendation,
         data_inspection=data_inspection,
         warnings=warnings,
     )

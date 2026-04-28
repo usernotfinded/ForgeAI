@@ -129,7 +129,7 @@ $ forge plan --arch transformer --params 400M --data ./my-corpus/
 Key features:
 - **Cost and time estimation before training starts** — no surprises at hour 200
 - **Auto-configuration** — dtype, batch size, gradient accumulation, optimizer chosen for your hardware
-- **Honest constraint reporting** — the planner highlights when a requested setup is likely unrealistic on detected hardware
+- **Honest advisory feasibility reporting** — Hardware feasibility checks are advisory by default. Use --strict-hardware-checks to turn warnings into hard failures.
 - **Override everything** — advanced users can set any parameter manually
 
 ### Pipeline

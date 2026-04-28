@@ -105,6 +105,7 @@ def test_select_compatible_models_orders_by_recommendation() -> None:
     assert models[0].recommendation_level in {"alta", "media"}
 
 
-def test_select_compatible_models_returns_empty_when_memory_too_low() -> None:
+def test_select_compatible_models_warns_instead_of_filtering_when_memory_too_low() -> None:
     models = select_compatible_models(available_memory_gb=1.0)
-    assert models == []
+    assert models
+    assert all(model.recommendation_level == "non consigliata" for model in models)

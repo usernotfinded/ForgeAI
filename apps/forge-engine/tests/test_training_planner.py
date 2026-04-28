@@ -5,8 +5,14 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 
-from app.training.planner import _parse_params, estimate_training, inspect_data_path
+from app.training.planner import (
+    HARDWARE_ADVISORY_POLICY,
+    _parse_params,
+    estimate_training,
+    inspect_data_path,
+)
 
 
 def test_parse_params_supports_common_suffixes() -> None:
@@ -40,7 +46,49 @@ def test_estimate_training_returns_positive_values_for_cpu_backend() -> None:
     assert plan.estimated_tokens > 0
     assert plan.estimated_hours > 0
     assert plan.recommended_batch_size >= 1
+    assert plan.feasibility_status in {"good", "risky", "not recommended"}
     assert isinstance(plan.data_inspection, dict)
+
+
+def test_estimate_training_warns_but_does_not_fail_for_unrealistic_hardware() -> None:
+    backend = SimpleNamespace(
+        type=SimpleNamespace(value="cpu"),
+        device_name="tiny-cpu",
+        vram_gb=0.1,
+        recommended_dtype="float32",
+    )
+
+    plan = estimate_training(
+        arch="transformer",
+        params="7B",
+        data_path=".",
+        backend=backend,
+    )
+
+    assert plan.feasibility_status == "not recommended"
+    assert plan.memory_risk == "not recommended"
+    assert any("not recommended" in warning.lower() for warning in plan.warnings)
+
+
+def test_training_plan_output_mentions_hardware_advisory_policy() -> None:
+    backend = SimpleNamespace(
+        type=SimpleNamespace(value="cpu"),
+        device_name="cpu-test",
+        vram_gb=None,
+        recommended_dtype="float32",
+    )
+    plan = estimate_training(
+        arch="transformer",
+        params="50M",
+        data_path=".",
+        backend=backend,
+    )
+    console = Console(force_terminal=False, color_system=None, width=140)
+
+    with console.capture() as capture:
+        plan.print_summary(console)
+
+    assert HARDWARE_ADVISORY_POLICY in capture.get()
 
 
 def test_estimate_training_raises_for_missing_data_path() -> None:

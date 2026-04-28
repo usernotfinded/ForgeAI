@@ -46,6 +46,23 @@ def test_compatibility_passes_for_supported_backend(tmp_path: Path) -> None:
     assert all(target > inspection.native_context for target in compatibility.valid_targets)
 
 
+def test_compatibility_warns_but_does_not_block_low_memory_supported_backend(
+    tmp_path: Path,
+) -> None:
+    inspection = _inspect_default(tmp_path)
+
+    compatibility = analyze_compatibility(
+        inspection=inspection,
+        backend="cuda",
+        vram_gb=1.0,
+        unified_memory=False,
+    )
+
+    assert compatibility.is_supported is True
+    assert compatibility.valid_targets
+    assert any("fattibilità hardware" in warning for warning in compatibility.warnings)
+
+
 def test_compatibility_fails_when_backend_not_supported(tmp_path: Path) -> None:
     inspection = _inspect_default(tmp_path)
 
@@ -76,7 +93,7 @@ def test_validate_target_rejects_unknown_value() -> None:
     result = validate_target_context(32768, 262144, [65536, 131072])
 
     assert result.is_valid is False
-    assert "target realistici supportati" in (result.reason or "")
+    assert "target supportati" in (result.reason or "")
 
 
 def test_build_stretch_plan_uses_single_yarn_method() -> None:

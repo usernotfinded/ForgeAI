@@ -263,7 +263,7 @@ def _step_3_target_context(
     non_interactive: bool,
 ) -> bool:
     console.rule("[bold]Step 3/8 — Proposta Target Context[/bold]")
-    console.print("Perché: il target deve essere strettamente maggiore del contesto nativo e realistico per il tuo hardware.")
+    console.print("Perché: il target deve essere strettamente maggiore del contesto nativo e supportato dalla ricetta v1.")
 
     native_context = int(state.native_context or 0)
     compatibility = _compatibility_from_state(state)

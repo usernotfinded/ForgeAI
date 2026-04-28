@@ -36,6 +36,11 @@ class _DummyModel:
         return 1024
 
 
+class _LargeDummyModel(_DummyModel):
+    def num_parameters(self) -> int:
+        return 7_000_000_000
+
+
 def _backend_stub() -> SimpleNamespace:
     return SimpleNamespace(
         type=SimpleNamespace(value="cpu"),
@@ -201,6 +206,113 @@ def test_train_dataset_too_small_for_context_exits_non_zero_preflight(
 
     assert result.exit_code == 1
     assert "Dataset troppo piccolo per il context_length" in result.stdout
+
+
+def test_train_hardware_feasibility_warning_does_not_block_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    prepared = _prepare_tiny_dataset(tmp_path / "prepared", total_tokens=100)
+
+    backend = _backend_stub()
+    backend.vram_gb = 0.1
+    monkeypatch.setattr("app.core.backend.get_backend", lambda: backend)
+    monkeypatch.setattr("app.tokenizer.load_tokenizer", lambda _path: _DummyTokenizer())
+    monkeypatch.setattr(
+        "app.architectures.get_architecture",
+        lambda *_args, **kwargs: _LargeDummyModel(
+            context_length=int(kwargs.get("context_length", 8)),
+            vocab_size=int(kwargs.get("vocab_size", 64)),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.training.trainer.train",
+        lambda **_kwargs: {"final_step": 1, "final_loss": 1.0, "best_val_loss": None},
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "train",
+            "--arch",
+            "transformer",
+            "--preset",
+            "forge-nano",
+            "--data",
+            str(prepared),
+            "--tokenizer",
+            str(tmp_path / "tokenizer"),
+            "--output",
+            str(tmp_path / "checkpoints"),
+            "--context-length",
+            "8",
+            "--batch-size",
+            "1",
+            "--val-split",
+            "0.25",
+            "--max-steps",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Hardware warning" in result.stdout
+    assert "hardware feasibility is advisory" in result.stdout
+    assert "Training complete" in result.stdout
+
+
+def test_train_strict_hardware_checks_fail_on_advisory_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    prepared = _prepare_tiny_dataset(tmp_path / "prepared", total_tokens=100)
+
+    backend = _backend_stub()
+    backend.vram_gb = 0.1
+    monkeypatch.setattr("app.core.backend.get_backend", lambda: backend)
+    monkeypatch.setattr("app.tokenizer.load_tokenizer", lambda _path: _DummyTokenizer())
+    monkeypatch.setattr(
+        "app.architectures.get_architecture",
+        lambda *_args, **kwargs: _LargeDummyModel(
+            context_length=int(kwargs.get("context_length", 8)),
+            vocab_size=int(kwargs.get("vocab_size", 64)),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.training.trainer.train",
+        lambda **_kwargs: pytest.fail("training should not run in strict hardware mode"),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "train",
+            "--arch",
+            "transformer",
+            "--preset",
+            "forge-nano",
+            "--data",
+            str(prepared),
+            "--tokenizer",
+            str(tmp_path / "tokenizer"),
+            "--output",
+            str(tmp_path / "checkpoints"),
+            "--context-length",
+            "8",
+            "--batch-size",
+            "1",
+            "--val-split",
+            "0.25",
+            "--max-steps",
+            "1",
+            "--strict-hardware-checks",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Strict hardware checks enabled" in result.stdout
 
 
 def test_eval_perplexity_only_without_data_exits_non_zero(

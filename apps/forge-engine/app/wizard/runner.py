@@ -299,7 +299,7 @@ def _step_4_route_selection(console: Console, state: WizardSessionState, store: 
         compatible_models = select_compatible_models(backend.vram_gb, limit=5)
         if not compatible_models:
             console.print(
-                "[red]Nessun modello base compatibile trovato con l'hardware rilevato.[/red]"
+                "[red]Catalogo locale dei modelli base vuoto: impossibile selezionare un modello da adattare.[/red]"
             )
             if typer.confirm(
                 "Vuoi passare al percorso 'Addestra da zero' con preset piccolo?",
@@ -310,8 +310,8 @@ def _step_4_route_selection(console: Console, state: WizardSessionState, store: 
             else:
                 state.execution = {
                     "status": "blocked",
-                    "reason": "no_compatible_base_model",
-                    "next_action": "upgrade_hardware_or_choose_train_from_scratch",
+                    "reason": "no_base_model_catalog_entry",
+                    "next_action": "choose_train_from_scratch_or_add_catalog_entry",
                 }
                 store.save(state)
                 return False

@@ -58,7 +58,7 @@ It is intentionally conservative.
 ## Known limitations
 
 - Native MLX training is not complete; when `mlx` is detected without usable MPS training path, training falls back to CPU.
-- Hardware and model-size guidance is heuristic and should be treated as planning aid, not guarantee.
+- Hardware and model-size guidance is heuristic. Hardware feasibility checks are advisory by default. Use --strict-hardware-checks to turn warnings into hard failures.
 - Smoke/demo flow validates pipeline wiring, not model quality.
 - Evaluation in v1 is useful for checks/regressions but not a substitute for product-grade benchmark suites.
 - Web app is still MVP/experimental; routes are intentionally limited and frontend tests require local npm install (no committed lockfile yet).

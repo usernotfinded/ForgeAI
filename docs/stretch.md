@@ -9,7 +9,9 @@ In v1:
 - produce una variante persistente in formato **`adapter_plus_manifest`** (mapping artifact + manifest deterministico)
 - non promette "memoria magica" o "modello più intelligente"
 
-`forge stretch` non trasforma qualunque modello in 128k con un click: valuta compatibilità, propone target realistici, chiede consenso stratificato e valida i trade-off.
+`forge stretch` non trasforma qualunque modello in 128k con un click: valuta compatibilità, propone target supportati, segnala i rischi hardware in modo advisory, chiede consenso stratificato e valida i trade-off.
+
+Hardware feasibility checks are advisory by default. Use --strict-hardware-checks to turn warnings into hard failures.
 
 ## 2) Cosa NON fa (limiti espliciti v1)
 
@@ -32,7 +34,7 @@ Compatibile quando:
 Non compatibile:
 - architetture senza ricetta locale stretch
 - modello non RoPE-based
-- target non realistico per hardware
+- target non supportato dalla ricetta v1
 - target `<=` contesto nativo
 
 ## 4) Regola target context (obbligatoria)
@@ -41,7 +43,7 @@ Il target deve essere **strettamente maggiore** del contesto nativo.
 
 Esempio:
 - nativo `32768`
-- validi: `65536`, `131072`, `262144` (se realistici)
+- validi: `65536`, `131072`, `262144` (se supportati dalla ricetta)
 - non validi: `32768`, `16384`
 
 ## 5) Persistenza reale v1: `adapter_plus_manifest`
@@ -134,7 +136,7 @@ forge stretch \
 ```
 
 Outcome atteso:
-- target realistico e rischio più basso
+- target supportato e rischio più basso
 - variante `*-64k-yarn/`
 - output: `stretch_adapter.bin`, manifest, report, validation report
 
@@ -165,7 +167,7 @@ forge stretch --model ./models/qwen2.5-0.5b --target-context 32768
 
 Messaggio atteso:
 - rifiuto esplicito perché target non è strettamente maggiore del nativo
-- proposta target validi realistici disponibili
+- proposta target validi supportati disponibili
 
 ### Esempio D — ricostruzione variante
 
