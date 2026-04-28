@@ -68,8 +68,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      PYTHONPATH: apps/forge-engine
-      MYPYPATH: apps/forge-engine
+      PYTHONPATH: ${{ github.workspace }}/apps/forge-engine
+      MYPYPATH: ${{ github.workspace }}/apps/forge-engine
 
     steps:
       - name: Checkout
@@ -85,7 +85,7 @@ jobs:
           python -m pip install --upgrade pip
           # Core lane: install torch CPU + forge-engine to execute model/checkpoint tests.
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          python -m pip install -e ./apps/forge-engine --no-deps
+          python -m pip install -e ./apps/forge-engine
           python -m pip install pytest mypy typer rich numpy tqdm pydantic fastapi uvicorn tokenizers safetensors
 
       - name: Verify torch import
