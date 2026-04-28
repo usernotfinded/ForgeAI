@@ -8,6 +8,7 @@ Usage:
     forge train --arch transformer --params 400M --data ./corpus/ --tokenizer ./tokenizers/tok --output ./checkpoints/run-1/
     forge eval  ./checkpoints/run-1/latest --benchmark tinystories hellaswag-mini --tokenizer ./tokenizers/tok
     forge chat  ./checkpoints/run-1/latest
+    forge experimental keras-smoke
     forge model pull smollm-135m
 """
 
@@ -26,6 +27,69 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 console = Console()
+
+
+# ── forge experimental ────────────────────────────────────────────────────────
+
+
+experimental_app = typer.Typer(
+    help="Experimental integrations. Interfaces may change and are not stable."
+)
+app.add_typer(experimental_app, name="experimental")
+
+
+@experimental_app.command("keras-smoke")
+def keras_smoke(
+    train_step: bool = typer.Option(
+        True,
+        "--train-step/--no-train-step",
+        help="Run one tiny in-memory train step after the forward pass.",
+    ),
+):
+    """
+    EXPERIMENTAL: run a tiny optional Keras 3 smoke test.
+
+    This does not use KerasHub models, download weights, or replace ForgeAI's
+    native PyTorch training/checkpoint path.
+    """
+    from app.experimental.keras_backend import (
+        KerasUnavailableError,
+        check_availability,
+        run_smoke,
+    )
+
+    availability = check_availability()
+    if not availability.keras_installed:
+        console.print("[yellow]Experimental Keras integration is not available.[/yellow]")
+        console.print(availability.message, markup=False, soft_wrap=True)
+        raise typer.Exit(1)
+
+    console.print("\n[bold]ForgeAI — Experimental Keras smoke[/bold]")
+    console.print("[dim]This path is experimental and does not affect ForgeAI PyTorch training.[/dim]")
+
+    try:
+        result = run_smoke(train_step=train_step)
+    except KerasUnavailableError as exc:
+        console.print(str(exc), markup=False, soft_wrap=True)
+        raise typer.Exit(1) from exc
+    except Exception as exc:
+        console.print("[red]Experimental Keras smoke failed.[/red]")
+        console.print(f"[dim]{type(exc).__name__}: {exc}[/dim]")
+        raise typer.Exit(1) from exc
+
+    console.print(f"  Backend : {result.backend}")
+    console.print(f"  Keras   : {result.keras_version}")
+    console.print(
+        f"  KerasHub: {'available' if result.keras_hub_available else 'not installed'} "
+        "[dim](not used by smoke)[/dim]"
+    )
+    console.print(f"  Forward : output shape {result.output_shape}")
+    if result.train_loss is not None:
+        console.print(f"  Train   : one step loss {result.train_loss:.6f}")
+    else:
+        console.print("  Train   : skipped")
+
+    console.print("[green]Experimental Keras smoke completed.[/green]")
 
 
 # ── forge plan ────────────────────────────────────────────────────────────────
@@ -453,12 +517,20 @@ def evaluate(
 
     results = {}
 
+    requested_benchmarks = {item.lower() for item in benchmark}
+
     # Perplexity
-    if "perplexity" in benchmark:
+    if "perplexity" in requested_benchmarks:
         if not data:
+            if requested_benchmarks == {"perplexity"}:
+                console.print(
+                    "\n  [red]Perplexity requested but --data is missing.[/red] "
+                    "Pass a prepared dataset directory."
+                )
+                raise typer.Exit(1)
             console.print(
                 "\n  [yellow]Perplexity requested but --data is missing.[/yellow] "
-                "Pass a prepared dataset directory."
+                "Skipping perplexity and continuing with other checks."
             )
         else:
             from app.evaluation import compute_perplexity
@@ -476,7 +548,7 @@ def evaluate(
             console.print(f"    Tokens     : {ppl_result['tokens_evaluated']}")
 
     # TinyStories
-    if "tinystories" in benchmark:
+    if "tinystories" in requested_benchmarks:
         if not tokenizer_path:
             console.print("[red]--tokenizer required for tinystories proxy check[/red]")
         else:
@@ -496,7 +568,7 @@ def evaluate(
                 console.print(f"    [dim]{sample['generation'][:200]}[/dim]")
 
     # HellaSwag
-    if "hellaswag-mini" in benchmark:
+    if "hellaswag-mini" in requested_benchmarks:
         if not tokenizer_path:
             console.print("[red]--tokenizer required for hellaswag-mini local check[/red]")
         else:

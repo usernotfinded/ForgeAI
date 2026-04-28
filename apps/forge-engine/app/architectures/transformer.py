@@ -64,10 +64,35 @@ class GPTConfig:
     bias: bool = False             # Use bias in Linear layers (False = modern practice)
     tie_embeddings: bool = True    # Tie input/output embedding weights (saves params)
 
+    def __post_init__(self) -> None:
+        if self.vocab_size <= 0:
+            raise ValueError("vocab_size must be > 0.")
+        if self.context_length <= 0:
+            raise ValueError("context_length must be > 0.")
+        if self.n_layer <= 0:
+            raise ValueError("n_layer must be > 0.")
+        if self.n_head <= 0:
+            raise ValueError("n_head must be > 0.")
+        if self.n_kv_head <= 0:
+            raise ValueError("n_kv_head must be > 0.")
+        if self.n_embd <= 0:
+            raise ValueError("n_embd must be > 0.")
+        if self.n_embd % self.n_head != 0:
+            raise ValueError(
+                f"n_embd ({self.n_embd}) must be divisible by n_head ({self.n_head})."
+            )
+        if self.n_head % self.n_kv_head != 0:
+            raise ValueError(
+                f"n_head ({self.n_head}) must be divisible by n_kv_head ({self.n_kv_head})."
+            )
+
     @property
     def head_dim(self) -> int:
         """Dimension per attention head."""
-        assert self.n_embd % self.n_head == 0, "n_embd must be divisible by n_head"
+        if self.n_embd % self.n_head != 0:
+            raise ValueError(
+                f"n_embd ({self.n_embd}) must be divisible by n_head ({self.n_head})."
+            )
         return self.n_embd // self.n_head
 
     @property
@@ -397,9 +422,10 @@ class GPT(nn.Module):
             loss:   cross-entropy loss if targets provided, else None
         """
         B, T = idx.shape
-        assert T <= self.config.context_length, (
-            f"Sequence length {T} exceeds max context length {self.config.context_length}"
-        )
+        if T > self.config.context_length:
+            raise ValueError(
+                f"Sequence length {T} exceeds max context length {self.config.context_length}."
+            )
 
         # Embed tokens
         x = self.token_emb(idx)  # (B, T, n_embd)

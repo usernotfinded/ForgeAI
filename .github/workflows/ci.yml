@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  forge-engine:
-    name: Forge Engine (CPU)
+  forge-engine-light:
+    name: Forge Engine (Lightweight)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -23,7 +23,7 @@ jobs:
       - name: Install lightweight dev environment
         run: |
           python -m pip install --upgrade pip
-          # Keep CI fast and CPU-only: install the package editable, then only lightweight deps.
+          # Fast lane: lightweight checks without forcing torch installation.
           python -m pip install -e ./apps/forge-engine --no-deps
           python -m pip install pytest ruff typer rich numpy tqdm pydantic fastapi uvicorn tokenizers safetensors
 
@@ -62,3 +62,44 @@ jobs:
         run: |
           echo "Skipping apps/web checks in this lightweight gate."
           echo "Reason: no lockfile is committed and this CI is intentionally CPU-only/fast for core Python workflows."
+
+  forge-engine-core-torch:
+    name: Forge Engine (Core Torch + Mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install torch-enabled CPU test environment
+        run: |
+          python -m pip install --upgrade pip
+          # Core lane: install torch CPU + forge-engine to execute model/checkpoint tests.
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install -e ./apps/forge-engine --no-deps
+          python -m pip install pytest mypy typer rich numpy tqdm pydantic fastapi uvicorn tokenizers safetensors
+
+      - name: Verify torch import
+        run: |
+          python - <<'PY'
+          import torch
+          print(f"torch_version={torch.__version__}")
+          print(f"cuda_available={torch.cuda.is_available()}")
+          PY
+
+      - name: Pytest (torch-enabled, no silent torch skips)
+        run: |
+          pytest apps/forge-engine/tests -q -p no:cacheprovider -rs | tee pytest_torch.log
+          if grep -q "No module named 'torch'" pytest_torch.log; then
+            echo "Torch-dependent tests were skipped unexpectedly in torch-enabled lane."
+            exit 1
+          fi
+
+      - name: Mypy strict (forge-engine app)
+        run: mypy --strict apps/forge-engine/app

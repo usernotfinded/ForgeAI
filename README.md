@@ -395,7 +395,7 @@ cd apps/web && npm install && npm run dev
 
 ### Minimal Smoke Test
 
-If you just cloned the repository, you can verify that the core engine works on your system by running the minimal smoke test. It runs the entire pipeline (data → tokenizer → train → chat) on a toy text file and finishes in seconds:
+If you just cloned the repository, run the smoke demo to verify end-to-end pipeline wiring on toy data (not model quality). The script exercises tokenizer training, data prepare, planning, short training, eval, checkpoint load, and tiny sample generation.
 
 ```bash
 ./scripts/smoke_test.sh
@@ -416,6 +416,23 @@ python -m pip install pytest ruff typer rich numpy tqdm pydantic fastapi uvicorn
 
 # 2) Run the same checks used by CI
 ./scripts/dev_checks.sh
+```
+
+### v0.1 Release Checklist
+
+```bash
+# editable install
+python -m pip install -e ./apps/forge-engine --no-deps
+
+# required checks
+./scripts/check_no_duplicate_suffix.sh
+ruff check .
+pytest apps/forge-engine/tests -q -p no:cacheprovider
+mypy --strict apps/forge-engine/app
+./scripts/dev_checks.sh
+
+# optional local smoke
+./scripts/smoke_test.sh
 ```
 
 ---
