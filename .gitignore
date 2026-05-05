@@ -50,6 +50,9 @@ dist/
 checkpoints/
 models/weights/
 models/checkpoints/
+# Keep forge-engine source package tracked (this is code, not runtime artifacts).
+!apps/forge-engine/app/checkpoints/
+!apps/forge-engine/app/checkpoints/*.py
 
 # ── Datasets ──────────────────────────────────────────────────────────────────
 # Raw data files — use MinIO/S3 for storage
